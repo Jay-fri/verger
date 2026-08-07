@@ -1,0 +1,56 @@
+@import "tailwindcss";
+
+/*
+ * Verger design tokens.
+ * Dark is the default/primary theme (the Control console runs in a dim booth
+ * environment). Light overrides apply under [data-theme="light"] for
+ * Prep/admin screens used in daytime. Values are exact hex from the project
+ * overview's "Design direction" section — do not adjust without updating
+ * that doc too.
+ */
+:root {
+  --color-background: #17140f;
+  --color-surface: #221d17;
+  --color-border: #3a322a;
+  --color-text-primary: #f3ecdd;
+  --color-text-secondary: #a89b87;
+  --color-accent-gold: #d6a34c;
+  --color-confident: #7c9257;
+  --color-needs-review: #c97a3d;
+  --color-live: #b5473a;
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+[data-theme="light"] {
+  --color-background: #f7f1e6;
+  --color-surface: #fffcf5;
+  --color-border: #ded2b9;
+  --color-text-primary: #241f19;
+  --color-text-secondary: #6e6455;
+  --color-accent-gold: #a9782a;
+  --color-confident: #5f7a3d;
+  --color-needs-review: #a85f27;
+  --color-live: #96392d;
+}
+
+@theme inline {
+  --color-background: var(--color-background);
+  --color-surface: var(--color-surface);
+  --color-border: var(--color-border);
+  --color-text-primary: var(--color-text-primary);
+  --color-text-secondary: var(--color-text-secondary);
+  --color-accent-gold: var(--color-accent-gold);
+  --color-confident: var(--color-confident);
+  --color-needs-review: var(--color-needs-review);
+  --color-live: var(--color-live);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+}

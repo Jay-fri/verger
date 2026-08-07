@@ -1,0 +1,28 @@
+{
+  "name": "verger",
+  "version": "0.0.0",
+  "private": true,
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @verger/web dev",
+    "build": "pnpm --filter @verger/web build",
+    "start": "pnpm --filter @verger/web start",
+    "lint": "eslint packages && pnpm --filter @verger/web lint",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "db:generate": "pnpm --filter @verger/web db:generate",
+    "db:migrate": "pnpm --filter @verger/web db:migrate",
+    "db:studio": "pnpm --filter @verger/web db:studio"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.18.0",
+    "eslint": "^9.18.0",
+    "prettier": "^3.4.2",
+    "prettier-plugin-tailwindcss": "^0.6.11",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.20.0"
+  }
+}
