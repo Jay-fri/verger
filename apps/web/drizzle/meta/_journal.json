@@ -36,6 +36,20 @@
       "when": 1786137786623,
       "tag": "0004_services_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786141417568,
+      "tag": "0005_colossal_harrier",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786141451361,
+      "tag": "0006_content_library_rls",
+      "breakpoints": true
     }
   ]
 }

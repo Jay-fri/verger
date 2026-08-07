@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
   detectChunk,
   MOCK_SERMON_TRANSCRIPT,
@@ -70,8 +70,14 @@ export async function runMockDetectionChunkAction(
     return { chunkIndex, chunkText: "", match: null, isLastChunk: true };
   }
 
-  const outlineRows = await db.query.cueItems.findMany({ where: eq(cueItems.serviceId, serviceId) });
-  const outline = outlineRows.map((row) => ({ book: row.book, chapter: row.chapter, verse: row.verse }));
+  // Only verse cues count as outline boosts — song/announcement/custom-text
+  // cues have no verse reference at all.
+  const outlineRows = await db.query.cueItems.findMany({
+    where: and(eq(cueItems.serviceId, serviceId), eq(cueItems.type, "verse")),
+  });
+  const outline = outlineRows
+    .filter((row) => row.book !== null && row.chapter !== null && row.verse !== null)
+    .map((row) => ({ book: row.book!, chapter: row.chapter!, verse: row.verse! }));
 
   const config: DetectionEngineConfig = { outline, autoDisplayThreshold: AUTO_DISPLAY_THRESHOLD };
   const event = await detectChunk(chunk, config);

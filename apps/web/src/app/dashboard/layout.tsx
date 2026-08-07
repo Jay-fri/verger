@@ -27,6 +27,12 @@ export default async function DashboardLayout({ children }: { children: ReactNod
               Prep
             </Link>
             <Link
+              href="/dashboard/library"
+              className="text-text-secondary hover:text-text-primary"
+            >
+              Library
+            </Link>
+            <Link
               href="/dashboard/settings"
               className="text-text-secondary hover:text-text-primary"
             >

@@ -1,3 +1,4 @@
+import { CueTypeBadge } from "@/components/cue-type-badge";
 import type { CueItem } from "./types";
 
 export function CueListPane({
@@ -34,11 +35,14 @@ export function CueListPane({
                         : "border-border bg-background hover:border-accent-gold/50"
                     }`}
                   >
-                    <p
-                      className={`text-sm font-medium ${isActive ? "text-accent-gold" : "text-text-primary"}`}
-                    >
-                      {item.label}
-                    </p>
+                    <div className="flex items-center gap-1.5">
+                      <CueTypeBadge type={item.type} />
+                      <p
+                        className={`truncate text-sm font-medium ${isActive ? "text-accent-gold" : "text-text-primary"}`}
+                      >
+                        {item.label}
+                      </p>
+                    </div>
                     <p className="mt-0.5 line-clamp-1 text-xs text-text-secondary">{item.text}</p>
                   </button>
                 </li>

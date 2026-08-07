@@ -1,7 +1,8 @@
+import { CueTypeBadge } from "@/components/cue-type-badge";
 import type { CueItem, LiveItem } from "./types";
 
 const SOURCE_LABEL: Record<LiveItem["source"], string> = {
-  cue: "From order of service",
+  cue: "Order of service",
   detection: "AI detected",
   search: "Manual search",
 };
@@ -31,9 +32,12 @@ export function LiveOutputPane({
         <div className="flex flex-1 flex-col justify-center rounded-xl border border-border bg-background p-8 text-center">
           {current ? (
             <>
-              <p className="text-xs font-medium tracking-wide text-text-secondary uppercase">
-                {SOURCE_LABEL[current.source]}
-              </p>
+              <div className="flex items-center justify-center gap-2">
+                <CueTypeBadge type={current.type} />
+                <p className="text-xs font-medium tracking-wide text-text-secondary uppercase">
+                  {SOURCE_LABEL[current.source]}
+                </p>
+              </div>
               <p className="mt-3 text-xl leading-relaxed text-text-primary sm:text-2xl">
                 &ldquo;{current.text}&rdquo;
               </p>
@@ -45,7 +49,10 @@ export function LiveOutputPane({
         </div>
 
         <div className="rounded-xl border border-border bg-surface p-4">
-          <p className="text-xs font-medium tracking-wide text-text-secondary uppercase">Next</p>
+          <div className="flex items-center gap-1.5">
+            <p className="text-xs font-medium tracking-wide text-text-secondary uppercase">Next</p>
+            {next && <CueTypeBadge type={next.type} />}
+          </div>
           {next ? (
             <>
               <p className="mt-1 line-clamp-1 text-sm text-text-primary">{next.text}</p>

@@ -115,25 +115,94 @@ export const services = pgTable("services", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
-// One verse in a service's cue list. Verse text/label are cached at add-time
-// (via @verger/bible-data) rather than re-resolved on every render — the
-// underlying translation text is static, and the Control console re-renders
-// often during a live service. Single-verse only for now (no ranges); the
-// "type" discriminator for songs/announcements (Phase 5's Content module)
-// isn't added yet since every cue is a verse until then — a trivial
-// additive migration when that's actually needed.
+export const cueItemTypeEnum = pgEnum("cue_item_type", [
+  "verse",
+  "song_section",
+  "announcement_slide",
+  "custom_text",
+]);
+
+// A church's reusable content library — songs, announcements, and custom
+// text all belong to the church (not a service), so the same song can be
+// cued in multiple services. Each is a title plus an ordered set of slides;
+// a "slide" is a song section (label + lyrics), an announcement slide
+// (plain text), or — for custom text — just the one slide, since it's
+// meant for one-off use (see custom_texts below) rather than a structured
+// multi-slide sequence like the other two.
+export const songs = pgTable("songs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  churchId: uuid("church_id")
+    .notNull()
+    .references(() => churches.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const songSections = pgTable("song_sections", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  songId: uuid("song_id")
+    .notNull()
+    .references(() => songs.id, { onDelete: "cascade" }),
+  position: integer("position").notNull(),
+  // e.g. "Verse 1", "Chorus", "Bridge" — operator-entered, not a fixed enum,
+  // since section naming conventions vary by song/church.
+  label: text("label").notNull(),
+  lyrics: text("lyrics").notNull(),
+});
+
+export const announcements = pgTable("announcements", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  churchId: uuid("church_id")
+    .notNull()
+    .references(() => churches.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const announcementSlides = pgTable("announcement_slides", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  announcementId: uuid("announcement_id")
+    .notNull()
+    .references(() => announcements.id, { onDelete: "cascade" }),
+  position: integer("position").notNull(),
+  text: text("text").notNull(),
+});
+
+// Freeform one-off text — a single slide, no sub-sections. Still
+// church-scoped and technically reusable (the data model doesn't forbid
+// cueing the same one in another service), but built for the "type
+// something once, put it on screen" case rather than a structured library
+// entry like songs/announcements.
+export const customTexts = pgTable("custom_texts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  churchId: uuid("church_id")
+    .notNull()
+    .references(() => churches.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  text: text("text").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// One item in a service's ordered cue list — a verse, a song section, an
+// announcement slide, or a custom text slide. Content is cached at add-time
+// (label + text; verse ref fields only populated when type = "verse")
+// rather than joined live from the library — consistent with how verses
+// already worked in Phase 4, and desirable here too: a service's cue list
+// shouldn't retroactively change if someone edits the song library later.
 export const cueItems = pgTable("cue_items", {
   id: uuid("id").primaryKey().defaultRandom(),
   serviceId: uuid("service_id")
     .notNull()
     .references(() => services.id, { onDelete: "cascade" }),
   position: integer("position").notNull(),
-  translation: text("translation").notNull(),
-  book: text("book").notNull(),
-  chapter: integer("chapter").notNull(),
-  verse: integer("verse").notNull(),
+  type: cueItemTypeEnum("type").notNull().default("verse"),
   label: text("label").notNull(),
   text: text("text").notNull(),
+  // Verse-only fields — null for every other type.
+  translation: text("translation"),
+  book: text("book"),
+  chapter: integer("chapter"),
+  verse: integer("verse"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -141,6 +210,9 @@ export const churchesRelations = relations(churches, ({ many }) => ({
   members: many(churchMembers),
   invites: many(churchInvites),
   services: many(services),
+  songs: many(songs),
+  announcements: many(announcements),
+  customTexts: many(customTexts),
 }));
 
 export const servicesRelations = relations(services, ({ one, many }) => ({
@@ -150,6 +222,31 @@ export const servicesRelations = relations(services, ({ one, many }) => ({
 
 export const cueItemsRelations = relations(cueItems, ({ one }) => ({
   service: one(services, { fields: [cueItems.serviceId], references: [services.id] }),
+}));
+
+export const songsRelations = relations(songs, ({ one, many }) => ({
+  church: one(churches, { fields: [songs.churchId], references: [churches.id] }),
+  sections: many(songSections),
+}));
+
+export const songSectionsRelations = relations(songSections, ({ one }) => ({
+  song: one(songs, { fields: [songSections.songId], references: [songs.id] }),
+}));
+
+export const announcementsRelations = relations(announcements, ({ one, many }) => ({
+  church: one(churches, { fields: [announcements.churchId], references: [churches.id] }),
+  slides: many(announcementSlides),
+}));
+
+export const announcementSlidesRelations = relations(announcementSlides, ({ one }) => ({
+  announcement: one(announcements, {
+    fields: [announcementSlides.announcementId],
+    references: [announcements.id],
+  }),
+}));
+
+export const customTextsRelations = relations(customTexts, ({ one }) => ({
+  church: one(churches, { fields: [customTexts.churchId], references: [churches.id] }),
 }));
 
 export const churchMembersRelations = relations(churchMembers, ({ one }) => ({

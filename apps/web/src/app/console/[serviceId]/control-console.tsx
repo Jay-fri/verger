@@ -41,16 +41,14 @@ export function ControlConsole({
     setActiveCueId(item.id);
     setCurrent({
       source: "cue",
-      book: item.book,
-      chapter: item.chapter,
-      verse: item.verse,
+      type: item.type,
       label: item.label,
       text: item.text,
     });
   }
 
   function pushSearchResultLive(verse: VerseSearchResult) {
-    setCurrent({ source: "search", ...verse });
+    setCurrent({ source: "search", type: "verse", label: verse.label, text: verse.text });
   }
 
   function confirmEntry(entryId: string) {
@@ -59,9 +57,7 @@ export function ControlConsole({
       if (!entry) return prev;
       setCurrent({
         source: "detection",
-        book: entry.book,
-        chapter: entry.chapter,
-        verse: entry.verse,
+        type: "verse",
         label: entry.label,
         text: entry.text,
       });
@@ -95,9 +91,7 @@ export function ControlConsole({
         if (match.decision === "auto-display") {
           setCurrent({
             source: "detection",
-            book: match.book,
-            chapter: match.chapter,
-            verse: match.verse,
+            type: "verse",
             label: match.label,
             text: match.text,
           });

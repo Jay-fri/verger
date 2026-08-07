@@ -3,38 +3,31 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
-import { addCueItemAction, removeCueItemAction, moveCueItemAction } from "@/lib/services/actions";
-import { VerseSearch } from "@/components/verse-search";
-import type { VerseSearchResult } from "@/lib/services/search";
+import { removeCueItemAction, moveCueItemAction } from "@/lib/services/actions";
+import type { CueItem } from "@/lib/services/types";
+import { CueTypeBadge } from "@/components/cue-type-badge";
+import { AddContentTabs } from "./add-content-tabs";
 
 type Service = { id: string; title: string; status: string };
-type CueItem = {
-  id: string;
-  position: number;
-  book: string;
-  chapter: number;
-  verse: number;
-  label: string;
-  text: string;
-  translation: string;
-};
+type LibrarySong = { id: string; title: string; sections: { id: string; label: string; lyrics: string }[] };
+type LibraryAnnouncement = { id: string; title: string; slides: { id: string; text: string }[] };
+type LibraryCustomText = { id: string; title: string; text: string };
 
 export function OutlineEditor({
   service,
   initialCueItems,
+  librarySongs,
+  libraryAnnouncements,
+  libraryCustomTexts,
 }: {
   service: Service;
   initialCueItems: CueItem[];
+  librarySongs: LibrarySong[];
+  libraryAnnouncements: LibraryAnnouncement[];
+  libraryCustomTexts: LibraryCustomText[];
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-
-  function handleAdd(verse: VerseSearchResult) {
-    startTransition(async () => {
-      await addCueItemAction(service.id, verse);
-      router.refresh();
-    });
-  }
 
   function handleRemove(cueItemId: string) {
     startTransition(async () => {
@@ -67,10 +60,15 @@ export function OutlineEditor({
 
       <section className="rounded-xl border border-border bg-surface p-6">
         <h2 className="text-sm font-medium tracking-wide text-accent-gold uppercase">
-          Add a verse
+          Add content
         </h2>
         <div className="mt-4">
-          <VerseSearch onSelect={handleAdd} selectLabel="Add to outline" />
+          <AddContentTabs
+            serviceId={service.id}
+            librarySongs={librarySongs}
+            libraryAnnouncements={libraryAnnouncements}
+            libraryCustomTexts={libraryCustomTexts}
+          />
         </div>
       </section>
 
@@ -78,7 +76,8 @@ export function OutlineEditor({
         <h2 className="text-sm font-medium tracking-wide text-accent-gold uppercase">Outline</h2>
         {initialCueItems.length === 0 ? (
           <p className="mt-4 text-sm text-text-secondary">
-            No verses yet — search above to add the first one.
+            Nothing in the outline yet — add scripture, a song, an announcement, or custom text
+            above.
           </p>
         ) : (
           <ol className="mt-4 space-y-2">
@@ -92,7 +91,10 @@ export function OutlineEditor({
                     {index + 1}
                   </span>
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-accent-gold">{item.label}</p>
+                    <div className="flex items-center gap-2">
+                      <CueTypeBadge type={item.type} />
+                      <p className="text-sm font-medium text-accent-gold">{item.label}</p>
+                    </div>
                     <p className="mt-0.5 line-clamp-2 text-sm text-text-secondary">{item.text}</p>
                   </div>
                 </div>

@@ -1,19 +1,9 @@
-export type CueItem = {
-  id: string;
-  position: number;
-  book: string;
-  chapter: number;
-  verse: number;
-  label: string;
-  text: string;
-  translation: string;
-};
+export type { CueItemType, CueItem } from "@/lib/services/types";
+import type { CueItemType } from "@/lib/services/types";
 
 export type LiveItem = {
   source: "cue" | "detection" | "search";
-  book: string;
-  chapter: number;
-  verse: number;
+  type: CueItemType;
   label: string;
   text: string;
 };

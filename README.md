@@ -3,13 +3,12 @@
 A live scripture-detection tool for church media teams. See
 [verger-project-overview.md](./verger-project-overview.md) for the full product spec.
 
-This repo is at **Phase 4: the Control console UI**. Phase 0 (scaffolding), Phase 1 (auth, church
-accounts, roles, onboarding), Phase 2 (the Bible data layer), and Phase 3 (the detection engine)
-are done. This phase adds the actual operator-facing screens — Prep (build a service outline) and
-the three-pane Control console (order of service / live output / AI detected) — wired end to end
-to the detection engine from Phase 3, still fed a mocked transcript. Live speech-to-text, the
-Content module (songs/announcements), Realtime cross-window sync, and the Stage output route are
-still not built.
+This repo is at **Phase 5: the Content module**. Phase 0 (scaffolding), Phase 1 (auth, church
+accounts, roles, onboarding), Phase 2 (the Bible data layer), Phase 3 (the detection engine), and
+Phase 4 (the Control console UI) are done. This phase extends Prep and the Control console to
+handle songs, announcements, and custom text alongside scripture in one ordered cue list, per the
+overview doc's "one shared runner" design. Live speech-to-text, Realtime cross-window sync, and
+the Stage output route are still not built.
 
 ## Folder structure
 
@@ -17,16 +16,18 @@ still not built.
 verger/
 ├── apps/
 │   └── web/                      # Next.js app (App Router, TypeScript) — the actual product
-│       ├── src/app/dashboard/prep/     # Prep: create a service, search+add/reorder/remove verse cues
+│       ├── src/app/dashboard/prep/     # Prep: create a service, add scripture/songs/announcements/custom text, reorder/remove
+│       ├── src/app/dashboard/library/  # Content library: create/delete songs (+ sections), announcements (+ slides), custom text
 │       ├── src/app/console/[serviceId]/ # Control console: three-pane operator screen (own top-level route, full-bleed — not the dashboard's centered layout)
 │       ├── src/app/                    # Also: sign-up/sign-in, onboarding, invite, dashboard, settings
-│       ├── src/lib/db/           # Drizzle client + schema (churches, services, cue_items, invites, profiles, ...)
-│       ├── src/lib/services/     # Service/cue-item CRUD, verse search, mock-detection Server Actions
+│       ├── src/lib/db/           # Drizzle client + schema (churches, services, cue_items, songs, announcements, custom_texts, ...)
+│       ├── src/lib/services/     # Service/cue-item CRUD (any content type), verse search, mock-detection Server Actions
+│       ├── src/lib/library/      # Song/announcement/custom-text CRUD Server Actions
 │       ├── src/lib/supabase/     # Supabase clients: browser, server (cookie-bound), proxy session refresh
 │       ├── src/lib/auth/         # Session + church-membership + role-check helpers, auth Server Actions
 │       ├── src/lib/invites/      # Invite generate/accept Server Actions
 │       ├── src/lib/onboarding/   # Create-church Server Action
-│       ├── src/components/       # Shared themed primitives (ui.tsx) + VerseSearch (shared by Prep and Console)
+│       ├── src/components/       # Shared themed primitives (ui.tsx), VerseSearch, CueTypeBadge — all shared by Prep and Console
 │       ├── src/proxy.ts          # Next.js 16 "proxy" (formerly middleware) — session refresh + auth gate
 │       └── drizzle/              # Generated + custom SQL migrations (drizzle-kit)
 ├── packages/
@@ -165,6 +166,35 @@ clickable "Add"/"Push live" buttons) on screen for the whole round trip of a new
 click during that window could silently act on the wrong verse. Fixed by clearing results the
 moment a new search starts rather than waiting for it to resolve.
 
+## Content module (Phase 5)
+
+Songs, announcements, and custom text now live in the same ordered cue list as scripture — "one
+shared runner," per the overview doc, not a separate system:
+
+- **Content library** (`/dashboard/library`, operator/admin only) — church-scoped, reusable across
+  services. Songs are a title plus ordered sections (Verse 1, Chorus, Bridge, ...); announcements
+  are a title plus ordered slides; custom text is a single freeform slide.
+- **`cue_items` is now polymorphic**: a `type` column (`verse` / `song_section` /
+  `announcement_slide` / `custom_text`) plus the same `label`/`text` pair for every type — content
+  is still cached at add-time rather than joined live (same tradeoff Phase 4 made for verses: a
+  service's cue list shouldn't retroactively change if the library is edited later). Verse-specific
+  columns (book/chapter/verse/translation) are now nullable, populated only when `type = "verse"`.
+- **Prep's "Add content"** is a tabbed picker (Scripture / Songs / Announcements / Custom text) —
+  scripture search is unchanged from Phase 4; songs/announcements pick from the library and add a
+  specific section/slide; custom text can either reuse a library entry or be typed and cued in one
+  step (it's meant for one-off use, so it doesn't force a trip to the Library page first).
+- **The Control console's cue list** shows a small type badge per item (`VERSE`/`SONG`/
+  `ANNOUNCEMENT`/`CUSTOM`) — deliberately neutral-colored text, not sage/terracotta/gold, since
+  those colors are already reserved for AI confidence state and the live/active indicator; reusing
+  them for content type would blur those meanings. Clicking any cue item — regardless of type —
+  pushes it to Live Output through the exact same mechanism Phase 4 built for confirming an
+  AI-detected verse.
+- **AI detection genuinely interleaves with manual cue running**, verified live: with a song
+  section pushed live and a mock detection session running in the background, manually clicking an
+  announcement cue mid-session didn't pause or disrupt detection — a new auto-displayed match
+  arrived moments later and correctly took over Live Output, while "Next" stayed correctly anchored
+  to the manually-selected cue throughout.
+
 ## Prerequisites
 
 - Node.js 20.9+, pnpm
@@ -220,8 +250,7 @@ pnpm db:studio      # Drizzle Studio — browse the DB in a local UI
 
 ## What's not built yet
 
-Live speech-to-text (the detection engine is still fed a mock transcript array), the Content
-module (songs/announcements/custom text — cue items are verse-only for now), Realtime sync between
-the Control console and a separate Stage output route (today the console's own "Live output" pane
-is the only display, per this phase's scope), the Stage output route itself, and the Electron NDI
-bridge. See the overview doc's "Suggested build order" for what's next.
+Live speech-to-text (the detection engine is still fed a mock transcript array), Realtime sync
+between the Control console and a separate Stage output route (today the console's own "Live
+output" pane is the only display), the Stage output route itself, and the Electron NDI bridge. See
+the overview doc's "Suggested build order" for what's next.

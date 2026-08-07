@@ -3,7 +3,7 @@ import { asc, eq } from "drizzle-orm";
 import { hasRequiredRole } from "@verger/shared-types";
 import { requireActiveMembership } from "@/lib/auth/membership";
 import { db } from "@/lib/db";
-import { cueItems, services } from "@/lib/db/schema";
+import { announcements, cueItems, customTexts, services, songs } from "@/lib/db/schema";
 import { OutlineEditor } from "./outline-editor";
 
 export const dynamic = "force-dynamic";
@@ -39,10 +39,34 @@ export default async function ServiceOutlinePage({
     notFound();
   }
 
-  const outline = await db.query.cueItems.findMany({
-    where: eq(cueItems.serviceId, serviceId),
-    orderBy: [asc(cueItems.position)],
-  });
+  const [outline, librarySongs, libraryAnnouncements, libraryCustomTexts] = await Promise.all([
+    db.query.cueItems.findMany({
+      where: eq(cueItems.serviceId, serviceId),
+      orderBy: [asc(cueItems.position)],
+    }),
+    db.query.songs.findMany({
+      where: eq(songs.churchId, membership.church.id),
+      with: { sections: { orderBy: (fields, { asc: ord }) => [ord(fields.position)] } },
+      orderBy: [asc(songs.createdAt)],
+    }),
+    db.query.announcements.findMany({
+      where: eq(announcements.churchId, membership.church.id),
+      with: { slides: { orderBy: (fields, { asc: ord }) => [ord(fields.position)] } },
+      orderBy: [asc(announcements.createdAt)],
+    }),
+    db.query.customTexts.findMany({
+      where: eq(customTexts.churchId, membership.church.id),
+      orderBy: [asc(customTexts.createdAt)],
+    }),
+  ]);
 
-  return <OutlineEditor service={service} initialCueItems={outline} />;
+  return (
+    <OutlineEditor
+      service={service}
+      initialCueItems={outline}
+      librarySongs={librarySongs}
+      libraryAnnouncements={libraryAnnouncements}
+      libraryCustomTexts={libraryCustomTexts}
+    />
+  );
 }
