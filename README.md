@@ -3,9 +3,11 @@
 A live scripture-detection tool for church media teams. See
 [verger-project-overview.md](./verger-project-overview.md) for the full product spec.
 
-This repo is at **Phase 1: auth, church accounts, roles, and onboarding**. Phase 0 (scaffolding,
-health check) is done; this phase adds real accounts, multi-tenant churches, invites, and
-role-based access. Prep, the detection engine, and the Control console are still not built.
+This repo is at **Phase 3: the detection engine (mocked transcript)**. Phase 0 (scaffolding),
+Phase 1 (auth, church accounts, roles, onboarding), and Phase 2 (the Bible data layer) are done.
+This phase adds the piece that turns a stream of transcript text into scored, routed scripture
+matches — fed a mock transcript for now, no live audio yet, no UI. Prep, the Control console, and
+live speech-to-text are still not built.
 
 ## Folder structure
 
@@ -23,11 +25,14 @@ verger/
 │       ├── src/proxy.ts          # Next.js 16 "proxy" (formerly middleware) — session refresh + auth gate
 │       └── drizzle/              # Generated + custom SQL migrations (drizzle-kit)
 ├── packages/
-│   ├── bible-data/                # Indexed translation text, exact-ref parser, semantic search (empty — later phase)
-│   ├── detection-engine/          # STT client, matching logic, confidence scoring (empty — later phase)
+│   ├── bible-data/                 # Indexed WEB translation (~31k verses), exact-ref parser, pgvector semantic search
+│   ├── detection-engine/           # Transcript-chunk -> scored match events; confidence scoring + auto-display/needs-review routing
 │   └── shared-types/               # ChurchRole, invite status, translation list, role-hierarchy logic (+ tests)
 └── infra/                          # Deploy/environment notes
 ```
+
+`packages/bible-data` and `packages/detection-engine` are each self-contained — see their own
+READMEs. Both have their own `.env.local` pointing at the same Supabase project as `apps/web`.
 
 ## Tech stack additions this phase
 
@@ -74,6 +79,53 @@ Role hierarchy (`packages/shared-types`): **admin ⊇ operator ⊇ volunteer** �
 operator- or volunteer-gated check, an operator passes volunteer-gated checks. `/dashboard/prep`
 demonstrates a real operator-gated route (volunteers see an explicit "Access restricted" message,
 not a client-side-hidden button).
+
+## Bible data layer (Phase 2)
+
+`packages/bible-data` is self-contained — see its own README for the full picture. Short version:
+
+- Translation: **World English Bible (WEB)**, public domain, sourced from
+  [bolls.life](https://bolls.life)'s API — chosen specifically to avoid licensing questions during
+  development. A licensed modern translation (NIV, ESV, etc.) needs its own rights check with the
+  publisher before production use.
+- Semantic search embeddings are generated **locally** (`Xenova/all-MiniLM-L6-v2` via
+  `@huggingface/transformers`, runs on-device via ONNX) — no API key, no per-call cost.
+- `resolveScripture(input)` is the function later phases (the detection engine) will call: exact
+  reference parsing first, embedding-based semantic search as the fallback.
+
+```bash
+cd packages/bible-data
+cp .env.example .env.local   # DATABASE_URL — same Supabase project as apps/web
+pnpm db:generate && pnpm db:migrate
+pnpm ingest   # ~31k verses, ~1-2 min
+pnpm embed    # generates embeddings for every verse, resumable if interrupted
+pnpm test     # includes 15+ fixture cases (exact refs + paraphrases) against the real data
+```
+
+## Detection engine (Phase 3)
+
+`packages/detection-engine` consumes `packages/bible-data` and turns a stream of transcript chunks
+into scored, routed match events. See its own README for the full picture. Short version:
+
+- **Exact matches are always confidence 1.** Semantic matches start from cosine similarity and get
+  boosted (and re-ranked) if they're in the session's Prep outline.
+- **The auto-display threshold is a required config value, not a default** — this is the exact
+  lever the overview doc calls out as the only thing a future solo mode would change to reuse this
+  same engine.
+- Output is an async generator (`detectFromTranscript`) — a stream in, a stream of events out —
+  fed a static mock array today, ready to be fed a real STT source later without changing its
+  interface.
+- **Real finding from sanity-checking match quality**: a pure similarity floor can't perfectly
+  separate "not scripture" from "a weak paraphrase" (their score ranges overlap), so some ordinary
+  sermon banter surfaces as a low-confidence needs-review suggestion. It's safe — never crosses
+  into auto-display — but not spotless. Full writeup in the package README.
+
+```bash
+cd packages/detection-engine
+cp .env.example .env.local   # DATABASE_URL — same Supabase project as the other packages
+pnpm test    # unit tests (confidence/router) + integration tests against real bible-data
+pnpm demo    # pretty-printed run of a mock 10-sentence sermon against real data
+```
 
 ## Prerequisites
 
@@ -123,12 +175,13 @@ pnpm build          # production build of apps/web
 pnpm start          # run the production build
 pnpm lint           # eslint across packages/* and apps/web
 pnpm typecheck      # tsc --noEmit across every workspace package
-pnpm test           # vitest — currently the role-hierarchy logic in packages/shared-types
+pnpm test           # vitest across every package (role-hierarchy logic, reference parser, live bible-data + detection-engine fixtures)
 pnpm format         # prettier --write .
 pnpm db:studio      # Drizzle Studio — browse the DB in a local UI
 ```
 
 ## What's not built yet
 
-Prep, the detection engine, the Control console, the Stage output route, and the Electron NDI
-bridge. See the overview doc's "Suggested build order" for what's next.
+Live speech-to-text (the detection engine is still fed a mock transcript array), Prep, the Control
+console, the Stage output route, and the Electron NDI bridge. See the overview doc's "Suggested
+build order" for what's next.
