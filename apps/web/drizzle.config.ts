@@ -16,6 +16,10 @@ export default defineConfig({
   dbCredentials: {
     url: process.env.DATABASE_URL,
   },
+  // Only manage the public schema. schema.ts declares a reference to
+  // auth.users (for FK typing) but Supabase owns that table — drizzle-kit
+  // must never try to create/alter it.
+  schemaFilter: ["public"],
   strict: true,
   verbose: true,
 });

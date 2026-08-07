@@ -8,6 +8,20 @@
       "when": 1786125236917,
       "tag": "0000_typical_shard",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1786126178653,
+      "tag": "0001_mute_taskmaster",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786126199536,
+      "tag": "0002_profiles_trigger_and_rls",
+      "breakpoints": true
     }
   ]
 }

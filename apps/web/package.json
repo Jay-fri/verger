@@ -13,6 +13,7 @@
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.48.1",
     "@verger/shared-types": "workspace:*",
     "drizzle-orm": "^0.38.4",
