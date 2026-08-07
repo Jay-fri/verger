@@ -38,6 +38,12 @@ importers:
       '@supabase/supabase-js':
         specifier: ^2.48.1
         version: 2.112.2
+      '@verger/bible-data':
+        specifier: workspace:*
+        version: link:../../packages/bible-data
+      '@verger/detection-engine':
+        specifier: workspace:*
+        version: link:../../packages/detection-engine
       '@verger/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types

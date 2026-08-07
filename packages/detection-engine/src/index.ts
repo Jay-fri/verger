@@ -15,3 +15,4 @@ export { isInOutline, boostedConfidence } from "./confidence";
 export { routeByConfidence } from "./router";
 export { detectChunk } from "./detect";
 export { detectFromTranscript } from "./stream";
+export { MOCK_SERMON_TRANSCRIPT, MOCK_SERMON_OUTLINE } from "./mock-transcript";

@@ -3,11 +3,13 @@
 A live scripture-detection tool for church media teams. See
 [verger-project-overview.md](./verger-project-overview.md) for the full product spec.
 
-This repo is at **Phase 3: the detection engine (mocked transcript)**. Phase 0 (scaffolding),
-Phase 1 (auth, church accounts, roles, onboarding), and Phase 2 (the Bible data layer) are done.
-This phase adds the piece that turns a stream of transcript text into scored, routed scripture
-matches — fed a mock transcript for now, no live audio yet, no UI. Prep, the Control console, and
-live speech-to-text are still not built.
+This repo is at **Phase 4: the Control console UI**. Phase 0 (scaffolding), Phase 1 (auth, church
+accounts, roles, onboarding), Phase 2 (the Bible data layer), and Phase 3 (the detection engine)
+are done. This phase adds the actual operator-facing screens — Prep (build a service outline) and
+the three-pane Control console (order of service / live output / AI detected) — wired end to end
+to the detection engine from Phase 3, still fed a mocked transcript. Live speech-to-text, the
+Content module (songs/announcements), Realtime cross-window sync, and the Stage output route are
+still not built.
 
 ## Folder structure
 
@@ -15,13 +17,16 @@ live speech-to-text are still not built.
 verger/
 ├── apps/
 │   └── web/                      # Next.js app (App Router, TypeScript) — the actual product
-│       ├── src/app/              # Routes: sign-up/sign-in, onboarding, invite, dashboard, ...
-│       ├── src/lib/db/           # Drizzle client + schema (churches, church_members, invites, profiles)
+│       ├── src/app/dashboard/prep/     # Prep: create a service, search+add/reorder/remove verse cues
+│       ├── src/app/console/[serviceId]/ # Control console: three-pane operator screen (own top-level route, full-bleed — not the dashboard's centered layout)
+│       ├── src/app/                    # Also: sign-up/sign-in, onboarding, invite, dashboard, settings
+│       ├── src/lib/db/           # Drizzle client + schema (churches, services, cue_items, invites, profiles, ...)
+│       ├── src/lib/services/     # Service/cue-item CRUD, verse search, mock-detection Server Actions
 │       ├── src/lib/supabase/     # Supabase clients: browser, server (cookie-bound), proxy session refresh
 │       ├── src/lib/auth/         # Session + church-membership + role-check helpers, auth Server Actions
 │       ├── src/lib/invites/      # Invite generate/accept Server Actions
 │       ├── src/lib/onboarding/   # Create-church Server Action
-│       ├── src/components/ui.tsx # Shared themed form/card primitives
+│       ├── src/components/       # Shared themed primitives (ui.tsx) + VerseSearch (shared by Prep and Console)
 │       ├── src/proxy.ts          # Next.js 16 "proxy" (formerly middleware) — session refresh + auth gate
 │       └── drizzle/              # Generated + custom SQL migrations (drizzle-kit)
 ├── packages/
@@ -127,6 +132,39 @@ pnpm test    # unit tests (confidence/router) + integration tests against real b
 pnpm demo    # pretty-printed run of a mock 10-sentence sermon against real data
 ```
 
+## Control console UI (Phase 4)
+
+`apps/web` now has the two operator-facing screens the rest of the app hangs off of:
+
+- **Prep** (`/dashboard/prep`, operator/admin only) — create a service, search for verses (exact
+  reference or paraphrase, via `@verger/bible-data`) and add them to an ordered outline, reorder
+  with up/down, remove. This outline becomes the session's confidence-boost list.
+- **Control console** (`/console/[serviceId]`, any role including volunteer) — the three-pane
+  layout from the design direction doc:
+  - **Order of service** (left) — click a cue item to push it live; active item highlighted gold.
+  - **Live output** (center) — current item large, "Next" preview below it, anchored to the cue
+    list independently of whatever AI detection is doing.
+  - **AI detected** (right) — fed by `@verger/detection-engine` against the Phase 3 mock
+    transcript, paced with a delay between chunks to simulate matches arriving live. Confidence is
+    color only — sage for confident/auto-displayed, terracotta for needs-review — **no percentage
+    is ever sent to the client**; the Server Action flattens the engine's raw similarity numbers
+    out before the response leaves the server, not just at render time. One-tap confirm pushes a
+    needs-review item live and flips it to sage. A manual search (same component as Prep's "add a
+    verse") is a fallback that can push any verse live directly.
+  - This is a genuinely full-bleed screen, not nested in the dashboard's centered layout — it has
+    its own top-level route (`/console/[serviceId]`, not `/dashboard/console/[serviceId]`) since a
+    three-pane operator console needs the full viewport, not a `max-w-4xl` column.
+- **New tables**: `services` (a Prep outline/session, with `draft`/`live`/`ended` status) and
+  `cue_items` (ordered verse cues), both church-scoped with the same RLS-is-defense-in-depth
+  posture as Phase 1's tables.
+
+This was verified with a real end-to-end browser walkthrough (sign up → create church → Prep →
+search/add three verses → open console → run the mock session → confirm a needs-review item),
+which caught and fixed one real bug: `VerseSearch` left the *previous* query's results (and their
+clickable "Add"/"Push live" buttons) on screen for the whole round trip of a new search, so a
+click during that window could silently act on the wrong verse. Fixed by clearing results the
+moment a new search starts rather than waiting for it to resolve.
+
 ## Prerequisites
 
 - Node.js 20.9+, pnpm
@@ -182,6 +220,8 @@ pnpm db:studio      # Drizzle Studio — browse the DB in a local UI
 
 ## What's not built yet
 
-Live speech-to-text (the detection engine is still fed a mock transcript array), Prep, the Control
-console, the Stage output route, and the Electron NDI bridge. See the overview doc's "Suggested
-build order" for what's next.
+Live speech-to-text (the detection engine is still fed a mock transcript array), the Content
+module (songs/announcements/custom text — cue items are verse-only for now), Realtime sync between
+the Control console and a separate Stage output route (today the console's own "Live output" pane
+is the only display, per this phase's scope), the Stage output route itself, and the Electron NDI
+bridge. See the overview doc's "Suggested build order" for what's next.

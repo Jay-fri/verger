@@ -22,6 +22,20 @@
       "when": 1786126199536,
       "tag": "0002_profiles_trigger_and_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786137768877,
+      "tag": "0003_next_riptide",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786137786623,
+      "tag": "0004_services_rls",
+      "breakpoints": true
     }
   ]
 }

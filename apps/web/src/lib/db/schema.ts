@@ -1,5 +1,15 @@
 import { relations } from "drizzle-orm";
-import { pgEnum, pgSchema, pgTable, serial, text, timestamp, unique, uuid } from "drizzle-orm/pg-core";
+import {
+  integer,
+  pgEnum,
+  pgSchema,
+  pgTable,
+  serial,
+  text,
+  timestamp,
+  unique,
+  uuid,
+} from "drizzle-orm/pg-core";
 import { CHURCH_ROLES, INVITE_STATUSES } from "@verger/shared-types";
 
 // Infra-verification table only — proves the Next.js -> Drizzle -> Supabase
@@ -84,9 +94,62 @@ export const churchInvites = pgTable("church_invites", {
   acceptedAt: timestamp("accepted_at", { withTimezone: true }),
 });
 
+export const serviceStatusEnum = pgEnum("service_status", ["draft", "live", "ended"]);
+
+// A Prep outline: the operator-built plan for a service, with an ordered
+// list of verse cues. "Starting a mock session" (Phase 4) or a real one
+// (later) transitions status to "live" — nothing outside this app reads
+// that yet (no Stage output route, no Realtime sync), so it's currently
+// just bookkeeping for the Control console's own UI.
+export const services = pgTable("services", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  churchId: uuid("church_id")
+    .notNull()
+    .references(() => churches.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  status: serviceStatusEnum("status").notNull().default("draft"),
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => authUsers.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// One verse in a service's cue list. Verse text/label are cached at add-time
+// (via @verger/bible-data) rather than re-resolved on every render — the
+// underlying translation text is static, and the Control console re-renders
+// often during a live service. Single-verse only for now (no ranges); the
+// "type" discriminator for songs/announcements (Phase 5's Content module)
+// isn't added yet since every cue is a verse until then — a trivial
+// additive migration when that's actually needed.
+export const cueItems = pgTable("cue_items", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  serviceId: uuid("service_id")
+    .notNull()
+    .references(() => services.id, { onDelete: "cascade" }),
+  position: integer("position").notNull(),
+  translation: text("translation").notNull(),
+  book: text("book").notNull(),
+  chapter: integer("chapter").notNull(),
+  verse: integer("verse").notNull(),
+  label: text("label").notNull(),
+  text: text("text").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 export const churchesRelations = relations(churches, ({ many }) => ({
   members: many(churchMembers),
   invites: many(churchInvites),
+  services: many(services),
+}));
+
+export const servicesRelations = relations(services, ({ one, many }) => ({
+  church: one(churches, { fields: [services.churchId], references: [churches.id] }),
+  cueItems: many(cueItems),
+}));
+
+export const cueItemsRelations = relations(cueItems, ({ one }) => ({
+  service: one(services, { fields: [cueItems.serviceId], references: [services.id] }),
 }));
 
 export const churchMembersRelations = relations(churchMembers, ({ one }) => ({
