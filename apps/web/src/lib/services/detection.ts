@@ -208,3 +208,19 @@ export async function setServiceStatusAction(
   await db.update(services).set({ status, updatedAt: new Date() }).where(eq(services.id, serviceId));
   revalidatePath(`/console/${serviceId}`);
 }
+
+// Session-level Auto/Manual display mode — chosen when a session starts
+// (see control-console.tsx, which only lets this change while idle).
+// Persisted server-side (not just local React state) so it's visible to any
+// other operator who opens the same console, the same reasoning as
+// status's draft/live/ended above.
+export async function setDisplayModeAction(
+  serviceId: string,
+  displayMode: "auto" | "manual",
+): Promise<void> {
+  await requireServiceAccess(serviceId);
+  if (!db) throw new Error("Database is not configured.");
+
+  await db.update(services).set({ displayMode, updatedAt: new Date() }).where(eq(services.id, serviceId));
+  revalidatePath(`/console/${serviceId}`);
+}

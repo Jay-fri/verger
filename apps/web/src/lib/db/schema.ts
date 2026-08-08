@@ -53,6 +53,13 @@ export const churches = pgTable("churches", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   defaultTranslation: text("default_translation").notNull().default("ESV"),
+  // A data: URL (base64-encoded image), not a Storage bucket reference —
+  // deliberate simplification: this avoids a manual Supabase Storage bucket
+  // creation step, at the cost of not being a great fit for large images.
+  // Upload is capped client-side (see settings' logo upload form) to keep
+  // this row reasonably sized. Used by the Stage output's "Logo" panic
+  // button (see live_state.mode).
+  logoDataUrl: text("logo_data_url"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -96,6 +103,17 @@ export const churchInvites = pgTable("church_invites", {
 
 export const serviceStatusEnum = pgEnum("service_status", ["draft", "live", "ended"]);
 
+// Session-level, chosen when a session starts (see control-console.tsx's
+// display-mode toggle, shown while sessionState is "idle"). Replaces a raw
+// confidence-threshold config with a simpler mental model per the
+// competitive audit (PewBeam: pick once per service). Auto/Manual only
+// changes whether a confident AI match is allowed to auto-push to the live
+// output — the underlying confidence computation (and the AI Detected
+// queue's sage/terracotta coloring) is unaffected either way; see
+// detectAgainstOutline's fixed AUTO_DISPLAY_THRESHOLD in
+// apps/web/src/lib/services/detection.ts.
+export const displayModeEnum = pgEnum("display_mode", ["auto", "manual"]);
+
 // A Prep outline: the operator-built plan for a service, with an ordered
 // list of verse cues. "Starting a mock session" (Phase 4) or a real one
 // (later) transitions status to "live" — nothing outside this app reads
@@ -108,6 +126,7 @@ export const services = pgTable("services", {
     .references(() => churches.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
   status: serviceStatusEnum("status").notNull().default("draft"),
+  displayMode: displayModeEnum("display_mode").notNull().default("auto"),
   createdBy: uuid("created_by")
     .notNull()
     .references(() => authUsers.id),
@@ -135,6 +154,17 @@ export const songs = pgTable("songs", {
     .notNull()
     .references(() => churches.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
+  // The song_sections.id sequence most recently used to cue this song into
+  // *any* service, in the order they were arranged — so building this song
+  // into a service a second time can offer that arrangement back instead of
+  // making the operator rebuild the section order from scratch every time.
+  // Kept in sync by syncSongArrangement() (see lib/services/actions.ts)
+  // whenever a service's cue list is edited in a way that touches this
+  // song's sections (add, remove, or reorder) — always reflects the most
+  // recently *touched* service's current arrangement for this song, not
+  // necessarily the most recently *created* one. Null until the song has
+  // been cued into a service at least once.
+  lastArrangement: text("last_arrangement").array(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -183,6 +213,21 @@ export const customTexts = pgTable("custom_texts", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+// Proclaim's four-part order-of-service model. Position (below) is a single
+// counter across the whole service regardless of section — sorting by
+// (section's fixed order, then position) still yields the correct
+// within-section order, so this doesn't need per-section position resets.
+// See CUE_SECTION_ORDER in lib/services/types.ts for the fixed section
+// ordering, and control-console.tsx for the pre/post-service loop
+// (wrap-around) navigation behavior these two sections get that "service"
+// and "warm_up" don't.
+export const cueSectionEnum = pgEnum("cue_section", [
+  "pre_service",
+  "warm_up",
+  "service",
+  "post_service",
+]);
+
 // One item in a service's ordered cue list — a verse, a song section, an
 // announcement slide, or a custom text slide. Content is cached at add-time
 // (label + text; verse ref fields only populated when type = "verse")
@@ -195,6 +240,7 @@ export const cueItems = pgTable("cue_items", {
     .notNull()
     .references(() => services.id, { onDelete: "cascade" }),
   position: integer("position").notNull(),
+  section: cueSectionEnum("section").notNull().default("service"),
   type: cueItemTypeEnum("type").notNull().default("verse"),
   label: text("label").notNull(),
   text: text("text").notNull(),
@@ -203,6 +249,16 @@ export const cueItems = pgTable("cue_items", {
   book: text("book"),
   chapter: integer("chapter"),
   verse: integer("verse"),
+  // song_section-only — null for every other type (including custom text
+  // and announcement slides, which have no equivalent "reusable order"
+  // concept). This is what lets syncSongArrangement() trace a cue item back
+  // to which song it belongs to and in what order, to keep
+  // songs.lastArrangement up to date. onDelete "set null" (not cascade):
+  // deleting a song section from the library shouldn't delete cue items
+  // that already cached its label/text into past services' outlines —
+  // consistent with this table's existing content-is-cached-not-joined
+  // design.
+  songSectionId: uuid("song_section_id").references(() => songSections.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -217,6 +273,17 @@ export const liveStateSourceEnum = pgEnum("live_state_source", [
   "quick",
 ]);
 
+// "content" is the normal case (whatever text/label/type/source above say).
+// The other three are the panic-button states (Clear/Black/Logo) — they
+// deliberately do NOT touch text/label/source/type, so "keep any
+// background" (per the feature spec) is just "we didn't overwrite the
+// underlying content row, only how the Stage output renders it right now."
+// Bypass the Control console's minimum-display-time debounce entirely —
+// see control-console.tsx's panic-button handlers, which call
+// setLiveStateModeAction directly rather than going through pushLive's
+// automatic-replacement throttling.
+export const liveStateModeEnum = pgEnum("live_state_mode", ["content", "clear", "black", "logo"]);
+
 // What's currently on screen for a service — one row per service, upserted
 // every time the Control console pushes something live (cue click, AI
 // confirm, AI auto-display, or manual search push). This table (not a
@@ -225,6 +292,17 @@ export const liveStateSourceEnum = pgEnum("live_state_source", [
 // just on the next change — Postgres Changes both delivers the live update
 // *and* backs a plain SELECT for that initial fetch. See
 // src/app/stage/[serviceId] and src/lib/services/live-state.ts.
+//
+// Also backs the Stage confidence monitor (src/app/monitor/[serviceId]) — a
+// second, pastor/band-facing route sharing this same table and Realtime
+// channel rather than standing up a separate one. next{Label,Text,Type} are
+// denormalized (cached at write-time, same philosophy as cue_items' own
+// content caching) rather than joined live from cue_items, specifically so
+// the public monitor route only ever needs to read this one table, the same
+// "public if you know the service ID" trust boundary the audience Stage
+// output already relies on — see drizzle/0008_live_state_realtime_and_rls.sql.
+// operatorMessage is monitor-only (never rendered on the audience Stage
+// output) — see control-console.tsx's operator-message field.
 export const liveState = pgTable("live_state", {
   serviceId: uuid("service_id")
     .primaryKey()
@@ -233,6 +311,11 @@ export const liveState = pgTable("live_state", {
   type: cueItemTypeEnum("type").notNull(),
   label: text("label").notNull(),
   text: text("text").notNull(),
+  mode: liveStateModeEnum("mode").notNull().default("content"),
+  nextLabel: text("next_label"),
+  nextText: text("next_text"),
+  nextType: cueItemTypeEnum("next_type"),
+  operatorMessage: text("operator_message"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 

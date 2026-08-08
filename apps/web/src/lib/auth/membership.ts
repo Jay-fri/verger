@@ -11,6 +11,7 @@ export type ActiveMembership = {
     id: string;
     name: string;
     defaultTranslation: string;
+    logoDataUrl: string | null;
   };
   role: ChurchRole;
 };
@@ -37,6 +38,7 @@ export async function getActiveMembership(userId: string): Promise<ActiveMembers
       id: membership.church.id,
       name: membership.church.name,
       defaultTranslation: membership.church.defaultTranslation,
+      logoDataUrl: membership.church.logoDataUrl,
     },
     role: membership.role,
   };

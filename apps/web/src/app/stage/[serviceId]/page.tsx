@@ -25,12 +25,21 @@ export default async function StagePage({
     notFound();
   }
 
-  const service = await db.query.services.findFirst({ where: eq(services.id, serviceId) });
+  const service = await db.query.services.findFirst({
+    where: eq(services.id, serviceId),
+    with: { church: true },
+  });
   if (!service) {
     notFound();
   }
 
   const initialLiveItem = await getLiveState(serviceId);
 
-  return <StageDisplay serviceId={serviceId} initialLiveItem={initialLiveItem} />;
+  return (
+    <StageDisplay
+      serviceId={serviceId}
+      initialLiveItem={initialLiveItem}
+      churchLogoDataUrl={service.church.logoDataUrl}
+    />
+  );
 }

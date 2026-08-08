@@ -4,12 +4,18 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { removeCueItemAction, moveCueItemAction } from "@/lib/services/actions";
+import { CUE_SECTIONS, CUE_SECTION_LABELS, LOOPING_SECTIONS, groupBySection } from "@/lib/services/cue-sections";
 import type { CueItem } from "@/lib/services/types";
 import { CueTypeBadge } from "@/components/cue-type-badge";
 import { AddContentTabs } from "./add-content-tabs";
 
 type Service = { id: string; title: string; status: string };
-type LibrarySong = { id: string; title: string; sections: { id: string; label: string; lyrics: string }[] };
+type LibrarySong = {
+  id: string;
+  title: string;
+  lastArrangement: string[] | null;
+  sections: { id: string; label: string; lyrics: string }[];
+};
 type LibraryAnnouncement = { id: string; title: string; slides: { id: string; text: string }[] };
 type LibraryCustomText = { id: string; title: string; text: string };
 
@@ -28,6 +34,7 @@ export function OutlineEditor({
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const grouped = groupBySection(initialCueItems);
 
   function handleRemove(cueItemId: string) {
     startTransition(async () => {
@@ -72,66 +79,81 @@ export function OutlineEditor({
         </div>
       </section>
 
-      <section className="rounded-xl border border-border bg-surface p-6">
-        <h2 className="text-sm font-medium tracking-wide text-accent-gold uppercase">Outline</h2>
-        {initialCueItems.length === 0 ? (
-          <p className="mt-4 text-sm text-text-secondary">
-            Nothing in the outline yet — add scripture, a song, an announcement, or custom text
-            above.
-          </p>
-        ) : (
-          <ol className="mt-4 space-y-2">
-            {initialCueItems.map((item, index) => (
-              <li
-                key={item.id}
-                className="flex items-start justify-between gap-3 rounded-lg border border-border bg-background p-3"
-              >
-                <div className="flex min-w-0 items-start gap-3">
-                  <span className="mt-0.5 text-xs font-medium text-text-secondary">
-                    {index + 1}
-                  </span>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <CueTypeBadge type={item.type} />
-                      <p className="text-sm font-medium text-accent-gold">{item.label}</p>
+      {CUE_SECTIONS.map((section) => {
+        const items = grouped[section];
+        const isLooping = LOOPING_SECTIONS.has(section);
+        return (
+          <section key={section} className="rounded-xl border border-border bg-surface p-6">
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-medium tracking-wide text-accent-gold uppercase">
+                {CUE_SECTION_LABELS[section]}
+              </h2>
+              {isLooping && (
+                <span
+                  title="Next/Previous wraps around within this section during a live session, instead of stopping or falling into the next section"
+                  className="rounded-full bg-accent-gold/15 px-2 py-0.5 text-[10px] font-medium tracking-wide text-accent-gold uppercase"
+                >
+                  Loops
+                </span>
+              )}
+            </div>
+            {items.length === 0 ? (
+              <p className="mt-4 text-sm text-text-secondary">Nothing here yet.</p>
+            ) : (
+              <ol className="mt-4 space-y-2">
+                {items.map((item, index) => (
+                  <li
+                    key={item.id}
+                    className="flex items-start justify-between gap-3 rounded-lg border border-border bg-background p-3"
+                  >
+                    <div className="flex min-w-0 items-start gap-3">
+                      <span className="mt-0.5 text-xs font-medium text-text-secondary">
+                        {index + 1}
+                      </span>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <CueTypeBadge type={item.type} />
+                          <p className="text-sm font-medium text-accent-gold">{item.label}</p>
+                        </div>
+                        <p className="mt-0.5 line-clamp-2 text-sm text-text-secondary">{item.text}</p>
+                      </div>
                     </div>
-                    <p className="mt-0.5 line-clamp-2 text-sm text-text-secondary">{item.text}</p>
-                  </div>
-                </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  <button
-                    type="button"
-                    disabled={isPending || index === 0}
-                    onClick={() => handleMove(item.id, "up")}
-                    aria-label="Move up"
-                    className="rounded border border-border px-2 py-1 text-xs text-text-primary hover:bg-surface disabled:opacity-30"
-                  >
-                    ↑
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isPending || index === initialCueItems.length - 1}
-                    onClick={() => handleMove(item.id, "down")}
-                    aria-label="Move down"
-                    className="rounded border border-border px-2 py-1 text-xs text-text-primary hover:bg-surface disabled:opacity-30"
-                  >
-                    ↓
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isPending}
-                    onClick={() => handleRemove(item.id)}
-                    aria-label="Remove"
-                    className="text-live hover:bg-live/10 rounded border border-border px-2 py-1 text-xs"
-                  >
-                    ✕
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ol>
-        )}
-      </section>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <button
+                        type="button"
+                        disabled={isPending || index === 0}
+                        onClick={() => handleMove(item.id, "up")}
+                        aria-label="Move up"
+                        className="rounded border border-border px-2 py-1 text-xs text-text-primary hover:bg-surface disabled:opacity-30"
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isPending || index === items.length - 1}
+                        onClick={() => handleMove(item.id, "down")}
+                        aria-label="Move down"
+                        className="rounded border border-border px-2 py-1 text-xs text-text-primary hover:bg-surface disabled:opacity-30"
+                      >
+                        ↓
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isPending}
+                        onClick={() => handleRemove(item.id)}
+                        aria-label="Remove"
+                        className="text-live hover:bg-live/10 rounded border border-border px-2 py-1 text-xs"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </section>
+        );
+      })}
     </div>
   );
 }

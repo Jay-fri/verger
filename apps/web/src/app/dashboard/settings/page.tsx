@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { churchInvites, churchMembers } from "@/lib/db/schema";
 import { RoleBadge } from "@/components/ui";
 import { InviteMemberForm } from "./invite-member-form";
+import { LogoUploadForm } from "./logo-upload-form";
 
 export default async function SettingsPage() {
   const { membership } = await requireActiveMembership();
@@ -44,6 +45,27 @@ export default async function SettingsPage() {
             <dd className="text-text-primary">{membership.church.defaultTranslation}</dd>
           </div>
         </dl>
+
+        {isAdmin ? (
+          <div className="mt-6 border-t border-border pt-4">
+            <h3 className="text-xs font-medium text-text-secondary uppercase">Logo</h3>
+            <div className="mt-2">
+              <LogoUploadForm currentLogoDataUrl={membership.church.logoDataUrl} />
+            </div>
+          </div>
+        ) : (
+          membership.church.logoDataUrl && (
+            <div className="mt-6 border-t border-border pt-4">
+              <h3 className="text-xs font-medium text-text-secondary uppercase">Logo</h3>
+              {/* eslint-disable-next-line @next/next/no-img-element -- a data: URL, not a remote asset */}
+              <img
+                src={membership.church.logoDataUrl}
+                alt="Church logo"
+                className="mt-2 h-16 w-16 rounded-lg border border-border object-contain"
+              />
+            </div>
+          )
+        )}
       </section>
 
       <section className="rounded-xl border border-border bg-surface p-6">

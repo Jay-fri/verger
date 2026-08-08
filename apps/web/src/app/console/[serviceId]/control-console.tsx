@@ -6,12 +6,19 @@ import type { ReferenceContext } from "@verger/bible-data";
 import {
   runLiveDetectionChunkAction,
   runMockDetectionChunkAction,
+  setDisplayModeAction,
   setServiceStatusAction,
   warmUpDetectionAction,
   type MockDetectionMatch,
 } from "@/lib/services/detection";
-import { setLiveStateAction } from "@/lib/services/live-state-action";
+import {
+  setLiveStateAction,
+  setLiveStateModeAction,
+  setOperatorMessageAction,
+} from "@/lib/services/live-state-action";
+import type { LiveStateMode } from "@/lib/services/live-state";
 import { getAdjacentVerseAction, type VerseSearchResult } from "@/lib/services/search";
+import { sortBySectionThenPosition, computeNextCue } from "@/lib/services/cue-sections";
 import { CueListPane } from "./cue-list-pane";
 import { LiveOutputPane } from "./live-output-pane";
 import { AiDetectedPane } from "./ai-detected-pane";
@@ -27,6 +34,13 @@ const TOTAL_MOCK_CHUNKS = 10;
 // stale context could mis-resolve something unrelated (e.g. a song's
 // "verse 2" mentioned well after the last scripture reference).
 const REFERENCE_CONTEXT_TTL_MS = 45_000;
+// Minimum time anything pushed to the live output stays up before an
+// AUTOMATIC (AI) push is allowed to replace it — prevents the AI flickering
+// between rapid re-detections. Deliberately does NOT apply to operator
+// actions (cue click, AI confirm tap, quick-insert, verse next/prev, panic
+// buttons) — those always take effect immediately; see pushLive's `auto`
+// parameter and recordMatch below. ~3-4s per the feature spec; tune here.
+const MIN_DISPLAY_TIME_MS = 3500;
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -45,11 +59,11 @@ function verseReferenceOf(item: CueItem): VerseReference | null {
   return { translation: item.translation, book: item.book, chapter: item.chapter, verse: item.verse };
 }
 
-type Service = { id: string; title: string; status: string };
+type Service = { id: string; title: string; status: string; displayMode: "auto" | "manual" };
 
 export function ControlConsole({
   service,
-  cueItems,
+  cueItems: rawCueItems,
   librarySongs,
   role,
 }: {
@@ -58,12 +72,19 @@ export function ControlConsole({
   librarySongs: LibrarySong[];
   role: string;
 }) {
+  // Sorted once here (section order, then position) — every consumer below
+  // (CueListPane, next-cue computation, navigation) relies on this order
+  // rather than re-sorting itself.
+  const cueItems = sortBySectionThenPosition(rawCueItems);
+
   const [activeCueId, setActiveCueId] = useState<string | null>(null);
   const [current, setCurrent] = useState<LiveItem | null>(null);
   const [entries, setEntries] = useState<DetectedEntry[]>([]);
   const [sessionState, setSessionState] = useState<"idle" | "running" | "finished">("idle");
   const [currentChunkText, setCurrentChunkText] = useState<string | null>(null);
   const [navPending, setNavPending] = useState(false);
+  const [displayMode, setDisplayModeState] = useState<"auto" | "manual">(service.displayMode);
+  const [operatorMessage, setOperatorMessage] = useState("");
   const cancelledRef = useRef(false);
   const liveChunkCounterRef = useRef(0);
   // Verses already surfaced for the turn currently in progress (book:chapter:verse
@@ -86,6 +107,11 @@ export function ControlConsole({
   // already running — the next partial 1.5s later, or the eventual final,
   // catches up regardless. Finals are never skipped.
   const processingChunkRef = useRef(false);
+  // Timestamp of the most recent live-output push, from ANY source — the
+  // minimum-display-time debounce (MIN_DISPLAY_TIME_MS) protects whatever's
+  // currently up from an AUTOMATIC replacement until this much time has
+  // passed, regardless of how the current content got there.
+  const lastPushedAtRef = useRef(0);
 
   function verseKey(match: MockDetectionMatch): string {
     return `${match.book}:${match.chapter}:${match.verse}`;
@@ -161,32 +187,52 @@ export function ControlConsole({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const activeCueIndex = activeCueId ? cueItems.findIndex((c) => c.id === activeCueId) : -1;
-  const activeCue = activeCueIndex >= 0 ? (cueItems[activeCueIndex] ?? null) : null;
-  const nextCue = activeCueIndex >= 0 ? (cueItems[activeCueIndex + 1] ?? null) : (cueItems[0] ?? null);
+  const activeCue = activeCueId ? (cueItems.find((c) => c.id === activeCueId) ?? null) : null;
+  const nextCue = computeNextCue(cueItems, activeCueId);
 
   // The one place "current" ever changes — updates local state immediately
   // (so the operator's own screen never waits on a round trip) and persists
   // to live_state, which is what actually notifies the Stage output route
   // via Postgres Changes. Every call site that used to call setCurrent
   // directly goes through this instead.
-  function pushLive(item: LiveItem) {
-    setCurrent(item);
+  //
+  // `next` is only ever passed by cue-related pushes (pushCueLive) — every
+  // other source (quick-insert, search, AI) omits it entirely, which
+  // (per setLiveStateAction's partial-update behavior) leaves whatever the
+  // Stage confidence monitor is currently showing as "Next" untouched,
+  // since only the order-of-service position — not what happens to be live
+  // right now — determines what's next.
+  function pushLive(item: LiveItem, next?: { label: string; text: string; type: CueItem["type"] } | null) {
+    setCurrent({ ...item, mode: "content" });
+    lastPushedAtRef.current = Date.now();
     const t0 = performance.now();
-    setLiveStateAction(service.id, item)
+    setLiveStateAction(service.id, {
+      source: item.source,
+      type: item.type,
+      label: item.label,
+      text: item.text,
+      mode: "content", // a normal content push always clears any earlier Clear/Black/Logo panic state
+      ...(next !== undefined
+        ? { nextLabel: next?.label ?? null, nextText: next?.text ?? null, nextType: next?.type ?? null }
+        : {}),
+    })
       .then(() => console.info(`[latency] stage-sync done for "${item.label}" in ${(performance.now() - t0).toFixed(0)}ms`))
       .catch(() => {});
   }
 
   function pushCueLive(item: CueItem) {
     setActiveCueId(item.id);
-    pushLive({
-      source: "cue",
-      type: item.type,
-      label: item.label,
-      text: item.text,
-      reference: verseReferenceOf(item),
-    });
+    const upcoming = computeNextCue(cueItems, item.id);
+    pushLive(
+      {
+        source: "cue",
+        type: item.type,
+        label: item.label,
+        text: item.text,
+        reference: verseReferenceOf(item),
+      },
+      upcoming ? { label: upcoming.label, text: upcoming.text, type: upcoming.type } : null,
+    );
   }
 
   function pushSearchResultLive(verse: VerseSearchResult) {
@@ -213,6 +259,33 @@ export function ControlConsole({
 
   function resumeActiveCue() {
     if (activeCue) pushCueLive(activeCue);
+  }
+
+  // Clear/Black/Logo — always-available panic buttons, always operator-
+  // initiated, so (per the feature spec) they bypass the minimum-display-
+  // time debounce entirely: they call setLiveStateModeAction directly
+  // rather than going through pushLive/recordMatch's automatic-replacement
+  // throttling. Still reset lastPushedAtRef, the same as any other
+  // operator push, so an AI auto-display can't immediately flicker over a
+  // Black screen the instant it goes up.
+  function pushPanicMode(mode: LiveStateMode) {
+    setCurrent((prev) => (prev ? { ...prev, mode } : { source: "quick", type: "custom_text", label: "", text: "", reference: null, mode }));
+    lastPushedAtRef.current = Date.now();
+    setLiveStateModeAction(service.id, mode).catch(() => {});
+  }
+
+  function sendOperatorMessage() {
+    setOperatorMessageAction(service.id, operatorMessage.trim() || null).catch(() => {});
+  }
+
+  function clearOperatorMessage() {
+    setOperatorMessage("");
+    setOperatorMessageAction(service.id, null).catch(() => {});
+  }
+
+  function changeDisplayMode(mode: "auto" | "manual") {
+    setDisplayModeState(mode);
+    setDisplayModeAction(service.id, mode).catch(() => {});
   }
 
   async function navigateVerse(direction: "next" | "prev") {
@@ -278,7 +351,9 @@ export function ControlConsole({
         verse: entry.verse,
       },
     });
-    setEntries((prev) => prev.map((e) => (e.id === entryId ? { ...e, status: "confirmed" } : e)));
+    setEntries((prev) =>
+      prev.map((e) => (e.id === entryId ? { ...e, status: "confirmed", autoDisplayed: false } : e)),
+    );
   }
 
   function dismissEntry(entryId: string) {
@@ -287,31 +362,59 @@ export function ControlConsole({
 
   // Shared by the mock-demo loop and the live AssemblyAI path: turns one
   // flattened detection match into either an auto-displayed live push or a
-  // needs-review queue entry. entryKey only has to be unique per chunk
-  // within this session (the mock loop uses its chunk index; the live path
-  // uses an incrementing counter, since there's no array index to reuse).
+  // needs-review/confident queue entry. entryKey only has to be unique per
+  // chunk within this session (the mock loop uses its chunk index; the live
+  // path uses an incrementing counter, since there's no array index to
+  // reuse).
+  //
+  // A confidence "auto-display" decision from the engine is necessary but
+  // not sufficient for an actual automatic push to the live output — two
+  // more gates apply, both session/operator-controlled rather than
+  // confidence-related: Manual mode (nothing auto-pushes, ever, regardless
+  // of confidence) and the minimum-display-time debounce (a too-soon
+  // automatic replacement is suppressed, not dropped — the match still
+  // lands in the queue with autoDisplayed: false, so the operator can
+  // confirm it immediately with one tap if they want it up sooner than the
+  // debounce would allow). The queue's sage/terracotta coloring (status)
+  // always reflects the engine's real confidence either way — see
+  // DetectedEntry's doc comment.
   function recordMatch(match: MockDetectionMatch, chunkText: string, entryKey: string) {
     const entryId = `${service.id}-${entryKey}-${match.book}-${match.chapter}-${match.verse}`;
+    let autoDisplayed = false;
 
     if (match.decision === "auto-display") {
-      pushLive({
-        source: "detection",
-        type: "verse",
-        label: match.label,
-        text: match.text,
-        reference: {
-          translation: match.translation,
-          book: match.book,
-          chapter: match.chapter,
-          verse: match.verse,
-        },
-      });
+      if (displayMode === "manual") {
+        console.info(`[display-mode] suppressed auto-display of ${match.label} — session is in Manual mode`);
+      } else {
+        const elapsed = Date.now() - lastPushedAtRef.current;
+        if (elapsed >= MIN_DISPLAY_TIME_MS) {
+          pushLive({
+            source: "detection",
+            type: "verse",
+            label: match.label,
+            text: match.text,
+            reference: {
+              translation: match.translation,
+              book: match.book,
+              chapter: match.chapter,
+              verse: match.verse,
+            },
+          });
+          autoDisplayed = true;
+        } else {
+          console.info(
+            `[debounce] suppressed auto-display of ${match.label} — ` +
+              `${MIN_DISPLAY_TIME_MS - elapsed}ms left on minimum display window`,
+          );
+        }
+      }
     }
 
     setEntries((prev) => [
       {
         id: entryId,
         status: match.decision === "auto-display" ? "confident" : "needs-review",
+        autoDisplayed,
         translation: match.translation,
         book: match.book,
         chapter: match.chapter,
@@ -375,6 +478,7 @@ export function ControlConsole({
     live.state === "listening" ||
     live.state === "reconnecting";
   const isMockActive = sessionState === "running";
+  const isSessionIdle = !isLiveActive && !isMockActive && sessionState === "idle";
   const liveButtonLabel =
     live.state === "error"
       ? "Retry live session"
@@ -402,6 +506,34 @@ export function ControlConsole({
           </div>
         </div>
         <div className="flex items-center gap-3">
+          {/* Auto/Manual is chosen once, when a session starts — locked once
+              a mock or live session is actually running, so it can't be
+              changed mid-session and mean something different for matches
+              already in flight. */}
+          <div className="flex items-center gap-1 rounded-lg border border-border p-0.5 text-xs font-medium">
+            <button
+              type="button"
+              disabled={!isSessionIdle}
+              onClick={() => changeDisplayMode("auto")}
+              title="High-confidence matches display automatically"
+              className={`rounded-md px-2.5 py-1 transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                displayMode === "auto" ? "bg-accent-gold text-background" : "text-text-secondary hover:text-text-primary"
+              }`}
+            >
+              Auto
+            </button>
+            <button
+              type="button"
+              disabled={!isSessionIdle}
+              onClick={() => changeDisplayMode("manual")}
+              title="Every match goes through the queue for a one-tap confirm"
+              className={`rounded-md px-2.5 py-1 transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                displayMode === "manual" ? "bg-accent-gold text-background" : "text-text-secondary hover:text-text-primary"
+              }`}
+            >
+              Manual
+            </button>
+          </div>
           <Link
             href={`/stage/${service.id}`}
             target="_blank"
@@ -409,6 +541,14 @@ export function ControlConsole({
             className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-text-primary hover:bg-background"
           >
             Open Stage output ↗
+          </Link>
+          <Link
+            href={`/monitor/${service.id}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-text-primary hover:bg-background"
+          >
+            Open confidence monitor ↗
           </Link>
           {live.state === "listening" && (
             <span className="flex items-center gap-1.5 text-xs text-text-secondary">
@@ -490,6 +630,11 @@ export function ControlConsole({
             onResumeActiveCue={resumeActiveCue}
             onNavigateVerse={navigateVerse}
             navPending={navPending}
+            onPanic={pushPanicMode}
+            operatorMessage={operatorMessage}
+            onOperatorMessageChange={setOperatorMessage}
+            onSendOperatorMessage={sendOperatorMessage}
+            onClearOperatorMessage={clearOperatorMessage}
           >
             <QuickInsertPanel librarySongs={librarySongs} onPush={pushQuickLive} />
           </LiveOutputPane>

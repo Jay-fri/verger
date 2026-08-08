@@ -1,4 +1,5 @@
 import { CueTypeBadge } from "@/components/cue-type-badge";
+import { CUE_SECTIONS, CUE_SECTION_LABELS, groupBySection } from "@/lib/services/cue-sections";
 import type { CueItem } from "./types";
 
 export function CueListPane({
@@ -10,6 +11,8 @@ export function CueListPane({
   activeCueId: string | null;
   onSelect: (item: CueItem) => void;
 }) {
+  const grouped = groupBySection(cueItems);
+
   return (
     <div className="flex h-full flex-col">
       <div className="border-b border-border p-4">
@@ -21,34 +24,47 @@ export function CueListPane({
         {cueItems.length === 0 ? (
           <p className="p-3 text-sm text-text-secondary">No cue items in this outline.</p>
         ) : (
-          <ol className="space-y-1.5">
-            {cueItems.map((item) => {
-              const isActive = item.id === activeCueId;
+          <div className="space-y-4">
+            {CUE_SECTIONS.map((section) => {
+              const items = grouped[section];
+              if (items.length === 0) return null;
               return (
-                <li key={item.id}>
-                  <button
-                    type="button"
-                    onClick={() => onSelect(item)}
-                    className={`w-full rounded-lg border p-3 text-left transition-colors ${
-                      isActive
-                        ? "border-accent-gold bg-accent-gold/10"
-                        : "border-border bg-background hover:border-accent-gold/50"
-                    }`}
-                  >
-                    <div className="flex items-center gap-1.5">
-                      <CueTypeBadge type={item.type} />
-                      <p
-                        className={`truncate text-sm font-medium ${isActive ? "text-accent-gold" : "text-text-primary"}`}
-                      >
-                        {item.label}
-                      </p>
-                    </div>
-                    <p className="mt-0.5 line-clamp-1 text-xs text-text-secondary">{item.text}</p>
-                  </button>
-                </li>
+                <div key={section}>
+                  <p className="px-1 pb-1.5 text-[11px] font-medium tracking-wide text-text-secondary uppercase">
+                    {CUE_SECTION_LABELS[section]}
+                  </p>
+                  <ol className="space-y-1.5">
+                    {items.map((item) => {
+                      const isActive = item.id === activeCueId;
+                      return (
+                        <li key={item.id}>
+                          <button
+                            type="button"
+                            onClick={() => onSelect(item)}
+                            className={`w-full rounded-lg border p-3 text-left transition-colors ${
+                              isActive
+                                ? "border-accent-gold bg-accent-gold/10"
+                                : "border-border bg-background hover:border-accent-gold/50"
+                            }`}
+                          >
+                            <div className="flex items-center gap-1.5">
+                              <CueTypeBadge type={item.type} />
+                              <p
+                                className={`truncate text-sm font-medium ${isActive ? "text-accent-gold" : "text-text-primary"}`}
+                              >
+                                {item.label}
+                              </p>
+                            </div>
+                            <p className="mt-0.5 line-clamp-1 text-xs text-text-secondary">{item.text}</p>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                </div>
               );
             })}
-          </ol>
+          </div>
         )}
       </div>
     </div>

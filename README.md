@@ -603,6 +603,131 @@ N of chapter M" ordering). Two regression tests added, both empirically verified
 before being locked in: the exact reported phrasing after a long preamble, and the verse-first ordering
 with both digits fillered. `packages/bible-data`: 97 tests passing (up from 95).
 
+## Competitive-audit features (Phase 8)
+
+Seven items from the "Feature audit and competitive mapping" section of `verger-project-overview.md`
+(PewBeam, ProPresenter, EasyWorship, Proclaim) — Session-level Auto/Manual display mode, a minimum
+display-time debounce, Clear/Black/Logo panic buttons, a Stage confidence monitor, operator → stage
+messaging, order-of-service sections, and saved song arrangements.
+
+**Session-level Auto/Manual display mode.** A per-service toggle (`services.display_mode`), chosen while
+a session is idle and locked once it starts. Doesn't touch the detection engine's confidence math at all
+— `detectAgainstOutline` still computes the same `decision` (auto-display/needs-review) it always did, so
+the AI Detected queue's sage/terracotta coloring is identical in both modes, exactly as specified ("still
+show confidence coloring... since it's informational either way"). What changes is purely whether
+`recordMatch` is *allowed* to act on an auto-display decision: in Manual mode every match — regardless of
+confidence — lands in the queue for a one-tap Confirm, never auto-pushed. A new `autoDisplayed` flag on
+each queue entry (separate from its confidence `status`) drives whether the UI shows "Auto-displayed" or
+Confirm/Dismiss buttons, so a confident-but-not-yet-displayed entry (Manual mode, or debounced — see
+below) still gets a one-tap path to the screen. Verified live: with Manual mode selected, running the
+mock demo left "Nothing live yet." on screen for the full run while three matches (two John 3:16, one
+Titus 3:15) queued up with correct sage/terracotta coloring; tapping Confirm on one pushed it live
+immediately.
+
+**Minimum display time (debounce).** `MIN_DISPLAY_TIME_MS` (3500ms, a top-level tunable in
+`control-console.tsx`, the same pattern as `CHUNK_DELAY_MS`/`PARTIAL_CHECK_INTERVAL_MS`). `pushLive` — the
+one function every live-output write goes through — stamps `lastPushedAtRef` on every push, from any
+source. Only the automatic path in `recordMatch` checks it: an auto-display decision within the window
+is suppressed (logged, not dropped — it still lands in the queue with `autoDisplayed: false`, so the
+operator can force it through immediately with one tap, since operator actions always bypass the
+debounce). Live proof (mock demo, real console log lines):
+```
+@7865ms:  [debounce] suppressed auto-display of John 3:16 — 1076ms left on minimum display window
+@16844ms: [debounce] suppressed auto-display of Philippians 4:13 — 282ms left on minimum display window
+```
+Both verses had already auto-displayed once each shortly before (John 3:16 at 5768ms, Romans 8:28 at
+13853ms) — the second line is the exact flicker scenario the debounce exists to prevent: Philippians 4:13
+tried to replace Romans 8:28 only ~3.0s after it went up, 282ms short of the 3.5s minimum, and was held
+back rather than flickering straight over it. (The mock demo's default 2.5s chunk cadence, it turns out,
+is usually *slower* than the 3.5s window on its own once round-trip time is added — a real live session's
+1.5s partial-transcript re-check cadence is the case this debounce actually protects continuously; the
+mock demo's `CHUNK_DELAY_MS` was temporarily dropped to 800ms to get a deterministic repro, then reverted.)
+
+**Clear/Black/Logo panic buttons.** Always-visible in the Live output pane header, backed by a new
+`live_state.mode` column (`content`/`clear`/`black`/`logo`) that's deliberately independent of the
+content columns (label/text/source/type) — a panic push never overwrites them, so "Clear (blank the text
+but keep any background)" is literally true in this data model: nothing about the underlying row changes,
+only how Stage output renders it. `setLiveStateModeAction` touches only `mode` (a minimal
+`onConflictDoUpdate` — see its doc comment), and is called directly from the panic-button handlers,
+bypassing `pushLive`/the debounce entirely, per spec ("an emergency override, not a normal content
+change"). Logo reads `churches.logo_data_url` — a plain `data:` URL, not a Storage bucket (a deliberate
+simplification: no manual Supabase dashboard bucket-creation step, at the cost of a ~500KB practical size
+cap, enforced both client-side in the upload form and server-side in `updateChurchLogoAction`). Verified
+live end to end: pushed a real verse live, opened the audience Stage output in a second tab showing it,
+then Black (solid `#000`), Clear (blank, themed background — deliberately distinct from Black, and from
+the "no session yet" placeholder too), Logo (a real uploaded test image rendered centered), and finally a
+normal cue push to confirm it resumes cleanly. All four states screenshotted against the live Stage tab.
+
+**Stage confidence monitor.** A second public route, `/monitor/[serviceId]` (added to `proxy.ts`'s
+`PUBLIC_PATHS` — same "public if you know the service ID" trust model as `/stage`), sharing the *same*
+`live_state` table and Realtime channel as the audience Stage output rather than standing up a parallel
+one. Shows current content, the next order-of-service item, and the operator message (below) — styled as
+a dense, small-text, monospace utility screen, deliberately distinct from Stage output's large centered
+broadcast-style text, since nobody's pointing a camera at it. "Next" is denormalized onto
+`live_state.next_label`/`next_text`/`next_type` at write time (same content-caching philosophy as
+`cue_items` itself), computed and sent by `pushCueLive` whenever the active cue changes — every other
+push type (quick-insert, search, AI) omits those fields entirely, which (via `setLiveStateAction`'s
+partial-update behavior) leaves the monitor's "Next" untouched, since only actual order-of-service
+position determines what's next, not whatever happens to be live at the moment.
+
+**Operator → stage messaging.** A text field in the Live output pane, `live_state.operator_message` (Send/
+Clear, no history — a fresh `setOperatorMessageAction` call fully replaces whatever was there). Rendered
+only by the monitor; `stage-display.tsx`'s `StageState` type deliberately omits the field entirely, so
+there's no code path by which it could leak onto the audience output. Verified live: sent a message from
+the console, watched it appear in the monitor's amber message panel within ~1-2s.
+
+**Order of service sections.** `cue_items.section` (`pre_service`/`warm_up`/`service`/`post_service`,
+Proclaim's four-part model), with a single global `position` counter across all sections — sorting by
+(fixed section order, then position) produces correct per-section ordering without needing per-section
+position resets (see `sortBySectionThenPosition`/`groupBySection`/`computeNextCue` in
+`lib/services/cue-sections.ts`). Prep's outline editor and the Control console's cue list both render four
+labeled, independently-orderable sections; `moveCueItemAction`'s up/down neighbor search is scoped to
+`current.section`, so reordering never crosses section boundaries. Pre-service and Post-service are
+tagged "Loops" in the UI: `computeNextCue` wraps Next back to a looping section's own first item once its
+last item is reached, instead of falling through into the next section — deliberately scoped to
+*navigation wrap-around* only this round, not an auto-advancing timed slideshow (that would overlap with
+the separate, not-yet-built "Countdown/elapsed timers" feature). Verified live: with two Pre-service
+items, activating the second (last) one showed the *first* one as "Next" — confirmed via screenshot,
+cue-list highlighting and the Live output pane's Next card both correct.
+
+**Saved song arrangements.** Genuinely not there before this phase — confirmed via investigation, not
+assumed: the content module only ever supported adding one song section to an outline at a time, with no
+concept of a reusable order surviving between services. Added `songs.last_arrangement` (a `text[]` of
+`song_section` IDs) plus `cue_items.song_section_id` (nullable, `onDelete: "set null"`, so deleting a
+library section doesn't retroactively break a past service's cached cue). `syncSongArrangement()`
+recomputes and re-saves a song's arrangement from whatever's *currently* in a given service's cue list
+after every add, remove, or reorder that touches one of its sections — always reflects the most
+recently-touched service, not necessarily the most recently-created one. A new "Reuse last arrangement (N
+sections)" button in Prep's song picker adds every section in one step, in that saved order (falling back
+to raw section order if the song has never been arranged yet). Verified live end to end across two
+separate services: built "Great Is Thy Faithfulness" as Verse 1 → Chorus in service A (confirmed
+`last_arrangement` persisted in that exact order); in a brand-new service B, the picker offered "Reuse
+last arrangement (2 sections)" and adding it produced Verse 1 → Chorus, not all three of the song's
+sections and not a different order.
+
+### Two real bugs found live-testing this phase
+
+**Postgres Changes realtime payloads use the raw database column names, not Drizzle's camelCase.** The
+monitor's realtime handler read `row.nextLabel`/`row.nextText`/`row.operatorMessage` — camelCase, matching
+`getLiveState`'s Drizzle-mapped return type — but a `postgres_changes` payload comes straight off the
+replication stream with no ORM in the loop, so the actual keys are `next_label`/`next_text`/
+`operator_message`. The mismatch failed silent: `row.nextLabel ?? null` just quietly became `null`, no
+error, no warning. `text`/`label`/`mode` "worked" the whole time by pure accident — they're single-word
+columns, so snake_case and camelCase happen to be identical. First reproduced live: sending an operator
+message made the monitor's "Next" card revert to "End of outline." even though the database still had the
+correct `next_text` the entire time (confirmed by direct query) — the bug was 100% client-side. Fixed by
+reading the payload's real snake_case keys directly.
+
+**A `flex-1` layout bug on the confidence monitor pushed the operator message off-screen with no way to
+scroll to it.** The "Now" card was `flex-1` (grow to fill all remaining space) in a `flex flex-col
+h-screen` column; a short "Now" text left a large empty gap that *was* the remaining space, so `flex-1`
+consumed nearly the whole screen height and pushed the "Next" card and the operator-message panel below
+the visible viewport — on a screen meant to run unattended and unscrolled. Caught by literally looking at
+the live-tested screenshot and finding the amber message panel simply wasn't there. Fixed by capping
+"Now" to `flex-3` (still the largest section, but bounded) with `overflow-y-auto` for genuinely long
+content, and `shrink-0` on the header/Next/message sections so they're never squeezed to zero regardless
+of viewport height.
+
 ## Prerequisites
 
 - Node.js 20.9+, pnpm

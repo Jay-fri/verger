@@ -6,13 +6,20 @@ import {
   addAnnouncementSlideCueAction,
   addCueItemAction,
   addCustomTextCueAction,
+  addSongArrangementCueAction,
   addSongSectionCueAction,
   createAndAddCustomTextCueAction,
 } from "@/lib/services/actions";
+import { CUE_SECTIONS, CUE_SECTION_LABELS, type CueSection } from "@/lib/services/cue-sections";
 import { VerseSearch } from "@/components/verse-search";
 import { Field } from "@/components/ui";
 
-type LibrarySong = { id: string; title: string; sections: { id: string; label: string; lyrics: string }[] };
+type LibrarySong = {
+  id: string;
+  title: string;
+  lastArrangement: string[] | null;
+  sections: { id: string; label: string; lyrics: string }[];
+};
 type LibraryAnnouncement = { id: string; title: string; slides: { id: string; text: string }[] };
 type LibraryCustomText = { id: string; title: string; text: string };
 
@@ -36,6 +43,7 @@ export function AddContentTabs({
   libraryCustomTexts: LibraryCustomText[];
 }) {
   const [tab, setTab] = useState<Tab>("Scripture");
+  const [section, setSection] = useState<CueSection>("service");
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
@@ -58,13 +66,28 @@ export function AddContentTabs({
         ))}
       </div>
 
+      <label className="mt-4 block">
+        <span className="mb-1 block text-xs font-medium text-text-secondary uppercase">Add to</span>
+        <select
+          value={section}
+          onChange={(e) => setSection(e.target.value as CueSection)}
+          className={selectClass}
+        >
+          {CUE_SECTIONS.map((s) => (
+            <option key={s} value={s}>
+              {CUE_SECTION_LABELS[s]}
+            </option>
+          ))}
+        </select>
+      </label>
+
       <div className="pt-4">
         {tab === "Scripture" && (
           <VerseSearch
             selectLabel="Add to outline"
             onSelect={(verse) =>
               startTransition(async () => {
-                await addCueItemAction(serviceId, verse);
+                await addCueItemAction(serviceId, section, verse);
                 router.refresh();
               })
             }
@@ -77,7 +100,13 @@ export function AddContentTabs({
             disabled={isPending}
             onAdd={(sectionId) =>
               startTransition(async () => {
-                await addSongSectionCueAction(serviceId, sectionId);
+                await addSongSectionCueAction(serviceId, section, sectionId);
+                router.refresh();
+              })
+            }
+            onAddArrangement={(songId) =>
+              startTransition(async () => {
+                await addSongArrangementCueAction(serviceId, section, songId);
                 router.refresh();
               })
             }
@@ -90,7 +119,7 @@ export function AddContentTabs({
             disabled={isPending}
             onAdd={(slideId) =>
               startTransition(async () => {
-                await addAnnouncementSlideCueAction(serviceId, slideId);
+                await addAnnouncementSlideCueAction(serviceId, section, slideId);
                 router.refresh();
               })
             }
@@ -103,13 +132,13 @@ export function AddContentTabs({
             disabled={isPending}
             onAddExisting={(id) =>
               startTransition(async () => {
-                await addCustomTextCueAction(serviceId, id);
+                await addCustomTextCueAction(serviceId, section, id);
                 router.refresh();
               })
             }
             onCreateAndAdd={(title, text) =>
               startTransition(async () => {
-                await createAndAddCustomTextCueAction(serviceId, title, text);
+                await createAndAddCustomTextCueAction(serviceId, section, title, text);
                 router.refresh();
               })
             }
@@ -125,10 +154,12 @@ function SongPicker({
   songs,
   disabled,
   onAdd,
+  onAddArrangement,
 }: {
   songs: LibrarySong[];
   disabled: boolean;
   onAdd: (sectionId: string) => void;
+  onAddArrangement: (songId: string) => void;
 }) {
   const [selectedId, setSelectedId] = useState(songs[0]?.id ?? "");
   const selected = songs.find((s) => s.id === selectedId);
@@ -152,27 +183,40 @@ function SongPicker({
       </select>
 
       {selected && (
-        <ul className="space-y-2">
-          {selected.sections.map((section) => (
-            <li
-              key={section.id}
-              className="flex items-start justify-between gap-3 rounded-lg border border-border bg-background p-3"
+        <>
+          {selected.lastArrangement && selected.lastArrangement.length > 0 && (
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => onAddArrangement(selected.id)}
+              className="w-full rounded-lg border border-accent-gold/40 bg-accent-gold/10 px-3 py-2 text-left text-sm font-medium text-accent-gold hover:bg-accent-gold/20 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-accent-gold">{section.label}</p>
-                <p className="mt-0.5 line-clamp-2 text-sm text-text-secondary">{section.lyrics}</p>
-              </div>
-              <button
-                type="button"
-                disabled={disabled}
-                onClick={() => onAdd(section.id)}
-                className={addButtonClass}
+              Reuse last arrangement ({selected.lastArrangement.length} section
+              {selected.lastArrangement.length === 1 ? "" : "s"})
+            </button>
+          )}
+          <ul className="space-y-2">
+            {selected.sections.map((section) => (
+              <li
+                key={section.id}
+                className="flex items-start justify-between gap-3 rounded-lg border border-border bg-background p-3"
               >
-                Add to outline
-              </button>
-            </li>
-          ))}
-        </ul>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-accent-gold">{section.label}</p>
+                  <p className="mt-0.5 line-clamp-2 text-sm text-text-secondary">{section.lyrics}</p>
+                </div>
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => onAdd(section.id)}
+                  className={addButtonClass}
+                >
+                  Add to outline
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </div>
   );

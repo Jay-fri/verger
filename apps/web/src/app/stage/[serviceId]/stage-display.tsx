@@ -2,18 +2,24 @@
 
 import { useEffect, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
-import type { LiveStateInput } from "@/lib/services/live-state";
+import type { LiveStateRow } from "@/lib/services/live-state";
 
-type LiveStateRow = { source: string; type: string; label: string; text: string };
+// Only the fields the audience Stage output actually renders — deliberately
+// narrower than LiveStateRow: this never reads operatorMessage or next*,
+// which are Stage confidence monitor-only (see monitor/[serviceId]).
+type StageState = Pick<LiveStateRow, "source" | "type" | "label" | "text" | "mode">;
+type LiveStateChangePayload = Pick<LiveStateRow, "source" | "type" | "label" | "text"> & { mode: string };
 
 export function StageDisplay({
   serviceId,
   initialLiveItem,
+  churchLogoDataUrl,
 }: {
   serviceId: string;
-  initialLiveItem: LiveStateInput | null;
+  initialLiveItem: LiveStateRow | null;
+  churchLogoDataUrl: string | null;
 }) {
-  const [item, setItem] = useState<LiveStateInput | null>(initialLiveItem);
+  const [item, setItem] = useState<StageState | null>(initialLiveItem);
 
   useEffect(() => {
     const supabase = createSupabaseBrowserClient();
@@ -28,13 +34,21 @@ export function StageDisplay({
         "postgres_changes",
         { event: "*", schema: "public", table: "live_state", filter: `service_id=eq.${serviceId}` },
         (payload) => {
-          const row = payload.new as LiveStateRow | undefined;
-          if (!row?.text) return;
+          const row = payload.new as LiveStateChangePayload | undefined;
+          if (!row) return;
+          // A "clear"/"black"/"logo" push deliberately doesn't touch text —
+          // per the panic-button spec, "keep any background" means the
+          // underlying content row is left alone. So the usual `!row.text`
+          // guard (an empty content push shouldn't blank the screen) only
+          // applies in "content" mode; the three panic modes are valid with
+          // no text at all.
+          if (row.mode === "content" && !row.text) return;
           setItem({
-            source: row.source as LiveStateInput["source"],
-            type: row.type as LiveStateInput["type"],
+            source: row.source as StageState["source"],
+            type: row.type as StageState["type"],
             label: row.label,
             text: row.text,
+            mode: (row.mode ?? "content") as StageState["mode"],
           });
         },
       )
@@ -48,6 +62,34 @@ export function StageDisplay({
       supabase.removeChannel(channel);
     };
   }, [serviceId]);
+
+  if (item?.mode === "black") {
+    return <div className="h-screen w-screen bg-black" />;
+  }
+
+  if (item?.mode === "logo") {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-background">
+        {churchLogoDataUrl ? (
+          // A data: URL, not an optimizable remote asset — next/image's loader doesn't apply here.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={churchLogoDataUrl} alt="Church logo" className="max-h-[70vh] max-w-[70vw] object-contain" />
+        ) : (
+          <p className="text-sm font-medium tracking-[0.3em] text-text-secondary/40 uppercase">
+            No logo uploaded
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  // "Clear" renders genuinely blank, not the Verger placeholder below — an
+  // operator hitting Clear mid-service wants nothing on the big screen, not
+  // a wordmark that could read as a glitch. The placeholder is reserved for
+  // "no session has pushed anything live yet at all."
+  if (item?.mode === "clear") {
+    return <div className="h-screen w-screen bg-background" />;
+  }
 
   if (!item) {
     return (

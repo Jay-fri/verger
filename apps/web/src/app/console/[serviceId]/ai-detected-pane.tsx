@@ -69,7 +69,17 @@ export function AiDetectedPane({
                 </div>
               </div>
 
-              {entry.status === "needs-review" ? (
+              {entry.status === "confirmed" ? (
+                <p className="text-confident mt-2 text-xs font-medium">Confirmed — on screen</p>
+              ) : entry.autoDisplayed ? (
+                <p className="text-confident mt-2 text-xs font-medium">Auto-displayed</p>
+              ) : (
+                // Needs a tap regardless of confidence tier — either it's a
+                // real needs-review match, or it's confident but didn't
+                // auto-push (Manual mode, or the minimum-display-time
+                // debounce held it back — see recordMatch's doc comment in
+                // control-console.tsx). Confirm always overrides
+                // immediately, debounce or no.
                 <div className="mt-2 flex gap-2">
                   <button
                     type="button"
@@ -86,10 +96,6 @@ export function AiDetectedPane({
                     Dismiss
                   </button>
                 </div>
-              ) : (
-                <p className="text-confident mt-2 text-xs font-medium">
-                  {entry.status === "confirmed" ? "Confirmed — on screen" : "Auto-displayed"}
-                </p>
               )}
             </div>
           ))
