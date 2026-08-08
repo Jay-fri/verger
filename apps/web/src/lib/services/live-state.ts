@@ -5,7 +5,7 @@ import { liveState } from "@/lib/db/schema";
 import type { CueItemType } from "./types";
 
 export type LiveStateInput = {
-  source: "cue" | "detection" | "search";
+  source: "cue" | "detection" | "search" | "quick";
   type: CueItemType;
   label: string;
   text: string;

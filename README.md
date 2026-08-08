@@ -3,12 +3,16 @@
 A live scripture-detection tool for church media teams. See
 [verger-project-overview.md](./verger-project-overview.md) for the full product spec.
 
-This repo is at **Phase 6: Realtime sync**. Phase 0 (scaffolding), Phase 1 (auth, church accounts,
-roles, onboarding), Phase 2 (the Bible data layer), Phase 3 (the detection engine), Phase 4 (the
-Control console UI), and Phase 5 (the Content module) are done. This phase adds the public Stage
-output route and wires it to the Control console over Supabase Realtime, so the two can run on
-different devices/networks — the milestone where this app becomes pilotable in a real service via
-vMix's Browser Source, ahead of the NDI bridge. Live speech-to-text is still not built.
+This repo is at **Phase 6.5: Live output verse navigation and quick-insert**. Phase 0 (scaffolding),
+Phase 1 (auth, church accounts, roles, onboarding), Phase 2 (the Bible data layer), Phase 3 (the
+detection engine), Phase 4 (the Control console UI), Phase 5 (the Content module), and Phase 6
+(realtime sync between the Control console and a public Stage output route, pilotable in a real
+service via vMix's Browser Source) are done. This phase is two usability fixes on top of Phase 6,
+prompted by piloting it: Previous/Next verse stepping in the live output (so an operator can walk
+through a passage one verse at a time regardless of what was originally matched or searched), and
+an always-available quick-insert panel for pushing custom text, a song section, or a scripture
+search live ad hoc without disturbing the operator's place in the order-of-service cue list. Live
+speech-to-text is still not built.
 
 ## Folder structure
 
@@ -18,7 +22,7 @@ verger/
 │   └── web/                      # Next.js app (App Router, TypeScript) — the actual product
 │       ├── src/app/dashboard/prep/     # Prep: create a service, add scripture/songs/announcements/custom text, reorder/remove
 │       ├── src/app/dashboard/library/  # Content library: create/delete songs (+ sections), announcements (+ slides), custom text
-│       ├── src/app/console/[serviceId]/ # Control console: three-pane operator screen (own top-level route, full-bleed — not the dashboard's centered layout)
+│       ├── src/app/console/[serviceId]/ # Control console: three-pane operator screen (own top-level route, full-bleed — not the dashboard's centered layout); live output includes verse Previous/Next nav + a quick-insert panel (text/song/scripture, doesn't touch cue position)
 │       ├── src/app/stage/[serviceId]/  # Stage output: public, chrome-free, full-screen — what vMix's Browser Source points at
 │       ├── src/app/                    # Also: sign-up/sign-in, onboarding, invite, dashboard, settings
 │       ├── src/lib/db/           # Drizzle client + schema (churches, services, cue_items, songs, announcements, custom_texts, live_state, ...)
@@ -238,6 +242,42 @@ via vMix's Browser Source, ahead of the Electron NDI bridge.
   cross-context realtime sync, and clean rendering at 1080p. I do not have vMix available in this
   environment (a licensed Windows/Mac product) to literally add it as a Browser Source — that
   confirmation is the one item in this phase's ask I'm handing back to you.
+
+## Live output verse navigation and quick-insert (Phase 6.5)
+
+Two usability fixes to the Control console's live output, found by actually piloting Phase 6.
+
+- **Previous/Next verse controls** — whenever the live output is a scripture verse (pushed from a
+  cue, a search, or an AI-detected match), the Live output pane shows ← Previous verse / Next
+  verse → buttons, plus left/right arrow-key shortcuts (ignored while an input/textarea/select has
+  focus, so they don't fight normal text editing anywhere else in the console). Stepping walks the
+  live `book`/`chapter`/`verse` one verse at a time via a new `getAdjacentVerse` lookup in
+  `@verger/bible-data` (`packages/bible-data/src/resolve.ts`) — it rolls into the next/previous
+  chapter at a chapter boundary (e.g. John 3:36 → John 4:1) but not across a book boundary, and this
+  works for a single AI-detected or searched verse just as well as a cue pulled from a pre-built
+  range, since it re-queries from wherever is currently live rather than replaying an original
+  match's verse list. Each step is a normal `pushLive` call, so it updates Stage output the same way
+  any other live push does.
+- **Quick-insert panel** — a persistent area under the live output (`quick-insert-panel.tsx`) with
+  Text / Song / Scripture tabs, for responding when the pastor goes off-script: type-and-push custom
+  text, pick a song section from the church's library, or search-and-push a scripture reference —
+  all pushed immediately, live. Crucially, quick-insert pushes never call `setActiveCueId`, so they
+  override the live output without moving the highlighted item in the order-of-service cue list;
+  when the live output isn't the active cue, a "Order of service paused at: `<cue>` · Resume" strip
+  appears so the operator can get back with one click. Verified live: pushed a cue mid-list, pushed
+  ad-hoc custom text over it, confirmed the cue list's highlight never moved, then resumed to the
+  exact same cue.
+- **New `live_state_source` value, `quick`** — added via `drizzle/0009_past_serpent_society.sql`
+  (a plain `ALTER TYPE ... ADD VALUE`) so ad-hoc pushes are honestly labeled "Quick insert" in the
+  live output pane rather than being misattributed to "search" or another existing source.
+- Verified live end-to-end via Playwright against a real seeded service (three cue items, a library
+  song, real WEB-translation verses) rather than just typecheck/build: pushed John 3:16 live, then
+  stepped forward three verses and back two via both the buttons and the arrow keys, confirming
+  Stage output tracked every step in realtime; then pushed a cue mid-list, overrode it with
+  quick-insert text, confirmed on Stage output too, and resumed the original cue. No new automated
+  tests beyond `getAdjacentVerse`'s chapter/book-boundary cases in
+  `packages/bible-data/src/resolve.test.ts` — the two flows above are UI interaction sequences, not
+  pure functions, so live browser verification is the honest check here, same reasoning as Phase 6.
 
 ## Prerequisites
 

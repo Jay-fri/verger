@@ -1,4 +1,4 @@
-import { and, asc, eq, gte, lte } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, lt, lte } from "drizzle-orm";
 import { getDb } from "./db";
 import { verses } from "./db/schema";
 import { parseReference, type ParsedReference } from "./reference-parser";
@@ -52,6 +52,90 @@ export async function getVersesForReference(
     .from(verses)
     .where(and(...conditions))
     .orderBy(asc(verses.verse));
+}
+
+const VERSE_COLUMNS = {
+  translation: verses.translation,
+  book: verses.book,
+  chapter: verses.chapter,
+  verse: verses.verse,
+  text: verses.text,
+};
+
+/**
+ * Steps one verse forward or backward from a given book/chapter/verse,
+ * rolling into the next/previous chapter at a chapter boundary (but not
+ * across a book boundary — reaching the start/end of a book's verse data
+ * returns null). Used by the Control console's verse-navigation controls so
+ * an operator can step through a passage one verse at a time regardless of
+ * how many verses the original match/reference covered.
+ */
+export async function getAdjacentVerse(
+  current: { book: string; chapter: number; verse: number },
+  direction: "next" | "prev",
+  translation: string = DEFAULT_TRANSLATION,
+): Promise<ResolvedVerse | null> {
+  const db = getDb();
+
+  if (direction === "next") {
+    const [withinChapter] = await db
+      .select(VERSE_COLUMNS)
+      .from(verses)
+      .where(
+        and(
+          eq(verses.translation, translation),
+          eq(verses.book, current.book),
+          eq(verses.chapter, current.chapter),
+          gt(verses.verse, current.verse),
+        ),
+      )
+      .orderBy(asc(verses.verse))
+      .limit(1);
+    if (withinChapter) return withinChapter;
+
+    const [nextChapter] = await db
+      .select(VERSE_COLUMNS)
+      .from(verses)
+      .where(
+        and(
+          eq(verses.translation, translation),
+          eq(verses.book, current.book),
+          gt(verses.chapter, current.chapter),
+        ),
+      )
+      .orderBy(asc(verses.chapter), asc(verses.verse))
+      .limit(1);
+    return nextChapter ?? null;
+  }
+
+  const [withinChapter] = await db
+    .select(VERSE_COLUMNS)
+    .from(verses)
+    .where(
+      and(
+        eq(verses.translation, translation),
+        eq(verses.book, current.book),
+        eq(verses.chapter, current.chapter),
+        lt(verses.verse, current.verse),
+      ),
+    )
+    .orderBy(desc(verses.verse))
+    .limit(1);
+  if (withinChapter) return withinChapter;
+
+  const [prevChapter] = await db
+    .select(VERSE_COLUMNS)
+    .from(verses)
+    .where(
+      and(
+        eq(verses.translation, translation),
+        eq(verses.book, current.book),
+        lt(verses.chapter, current.chapter),
+      ),
+    )
+    .orderBy(desc(verses.chapter), desc(verses.verse))
+    .limit(1);
+  return prevChapter ?? null;
 }
 
 /**

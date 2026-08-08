@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveScripture } from "./resolve";
+import { getAdjacentVerse, resolveScripture } from "./resolve";
 
 // Integration tests against the real ingested WEB translation + real
 // embeddings — this is the "verifiably correct before anything else builds
@@ -67,6 +67,41 @@ describe("resolveScripture — exact references", () => {
     // on the raw text rather than returning an empty exact result.
     const result = await resolveScripture("Genesis 99:1");
     expect(result.method).not.toBe("exact");
+  });
+});
+
+describe("getAdjacentVerse", () => {
+  it("steps forward within a chapter", async () => {
+    const next = await getAdjacentVerse({ book: "JHN", chapter: 3, verse: 16 }, "next");
+    expect(next).toMatchObject({ book: "JHN", chapter: 3, verse: 17 });
+  });
+
+  it("steps backward within a chapter", async () => {
+    const prev = await getAdjacentVerse({ book: "JHN", chapter: 3, verse: 16 }, "prev");
+    expect(prev).toMatchObject({ book: "JHN", chapter: 3, verse: 15 });
+  });
+
+  it("rolls forward into the next chapter's verse 1 at a chapter boundary", async () => {
+    // John 3 has 36 verses in WEB — stepping past the last one should land
+    // on John 4:1, not return null.
+    const next = await getAdjacentVerse({ book: "JHN", chapter: 3, verse: 36 }, "next");
+    expect(next).toMatchObject({ book: "JHN", chapter: 4, verse: 1 });
+  });
+
+  it("rolls backward into the previous chapter's last verse at a chapter boundary", async () => {
+    const prev = await getAdjacentVerse({ book: "JHN", chapter: 4, verse: 1 }, "prev");
+    expect(prev).toMatchObject({ book: "JHN", chapter: 3, verse: 36 });
+  });
+
+  it("returns null stepping past the end of a book", async () => {
+    // Jude has one chapter, 25 verses — no book boundary crossing.
+    const next = await getAdjacentVerse({ book: "JUD", chapter: 1, verse: 25 }, "next");
+    expect(next).toBeNull();
+  });
+
+  it("returns null stepping before the start of a book", async () => {
+    const prev = await getAdjacentVerse({ book: "GEN", chapter: 1, verse: 1 }, "prev");
+    expect(prev).toBeNull();
   });
 });
 

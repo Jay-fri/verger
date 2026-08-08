@@ -206,7 +206,16 @@ export const cueItems = pgTable("cue_items", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const liveStateSourceEnum = pgEnum("live_state_source", ["cue", "detection", "search"]);
+// "quick" (Phase 6.5) is an ad-hoc push from the Control console's
+// always-available quick-insert panel — custom text, a song section, or a
+// scripture search — pushed live without touching the operator's position
+// in the order-of-service cue list.
+export const liveStateSourceEnum = pgEnum("live_state_source", [
+  "cue",
+  "detection",
+  "search",
+  "quick",
+]);
 
 // What's currently on screen for a service — one row per service, upserted
 // every time the Control console pushes something live (cue click, AI

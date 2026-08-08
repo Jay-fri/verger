@@ -1,14 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { runMockDetectionChunkAction, setServiceStatusAction } from "@/lib/services/detection";
 import { setLiveStateAction } from "@/lib/services/live-state-action";
-import type { VerseSearchResult } from "@/lib/services/search";
+import { getAdjacentVerseAction, type VerseSearchResult } from "@/lib/services/search";
 import { CueListPane } from "./cue-list-pane";
 import { LiveOutputPane } from "./live-output-pane";
 import { AiDetectedPane } from "./ai-detected-pane";
-import type { CueItem, DetectedEntry, LiveItem } from "./types";
+import { QuickInsertPanel, type LibrarySong } from "./quick-insert-panel";
+import type { CueItem, DetectedEntry, LiveItem, VerseReference } from "./types";
 
 const CHUNK_DELAY_MS = 2500;
 const TOTAL_MOCK_CHUNKS = 10;
@@ -17,15 +18,24 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function verseReferenceOf(item: CueItem): VerseReference | null {
+  if (item.type !== "verse" || !item.translation || !item.book || item.chapter == null || item.verse == null) {
+    return null;
+  }
+  return { translation: item.translation, book: item.book, chapter: item.chapter, verse: item.verse };
+}
+
 type Service = { id: string; title: string; status: string };
 
 export function ControlConsole({
   service,
   cueItems,
+  librarySongs,
   role,
 }: {
   service: Service;
   cueItems: CueItem[];
+  librarySongs: LibrarySong[];
   role: string;
 }) {
   const [activeCueId, setActiveCueId] = useState<string | null>(null);
@@ -33,9 +43,11 @@ export function ControlConsole({
   const [entries, setEntries] = useState<DetectedEntry[]>([]);
   const [sessionState, setSessionState] = useState<"idle" | "running" | "finished">("idle");
   const [currentChunkText, setCurrentChunkText] = useState<string | null>(null);
+  const [navPending, setNavPending] = useState(false);
   const cancelledRef = useRef(false);
 
   const activeCueIndex = activeCueId ? cueItems.findIndex((c) => c.id === activeCueId) : -1;
+  const activeCue = activeCueIndex >= 0 ? (cueItems[activeCueIndex] ?? null) : null;
   const nextCue = activeCueIndex >= 0 ? (cueItems[activeCueIndex + 1] ?? null) : (cueItems[0] ?? null);
 
   // The one place "current" ever changes — updates local state immediately
@@ -50,20 +62,105 @@ export function ControlConsole({
 
   function pushCueLive(item: CueItem) {
     setActiveCueId(item.id);
-    pushLive({ source: "cue", type: item.type, label: item.label, text: item.text });
+    pushLive({
+      source: "cue",
+      type: item.type,
+      label: item.label,
+      text: item.text,
+      reference: verseReferenceOf(item),
+    });
   }
 
   function pushSearchResultLive(verse: VerseSearchResult) {
-    pushLive({ source: "search", type: "verse", label: verse.label, text: verse.text });
+    pushLive({
+      source: "search",
+      type: "verse",
+      label: verse.label,
+      text: verse.text,
+      reference: {
+        translation: verse.translation,
+        book: verse.book,
+        chapter: verse.chapter,
+        verse: verse.verse,
+      },
+    });
   }
 
+  // Quick-insert pushes deliberately never touch activeCueId — that's what
+  // lets an ad-hoc push override the live output without disturbing the
+  // operator's position in the order-of-service cue list.
+  function pushQuickLive(item: Omit<LiveItem, "source">) {
+    pushLive({ ...item, source: "quick" });
+  }
+
+  function resumeActiveCue() {
+    if (activeCue) pushCueLive(activeCue);
+  }
+
+  async function navigateVerse(direction: "next" | "prev") {
+    if (!current?.reference || navPending) return;
+    setNavPending(true);
+    try {
+      const adjacent = await getAdjacentVerseAction(current.reference, direction);
+      if (!adjacent) return;
+      pushLive({
+        ...current,
+        label: adjacent.label,
+        text: adjacent.text,
+        reference: {
+          translation: adjacent.translation,
+          book: adjacent.book,
+          chapter: adjacent.chapter,
+          verse: adjacent.verse,
+        },
+      });
+    } finally {
+      setNavPending(false);
+    }
+  }
+
+  // Left/right arrow keys step through the live verse, same as clicking
+  // Previous/Next — skipped while the operator is typing anywhere (search
+  // boxes, quick-insert text area) so the keys keep their normal text-input
+  // behavior there.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      if (!current?.reference) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable) return;
+
+      e.preventDefault();
+      navigateVerse(e.key === "ArrowLeft" ? "prev" : "next");
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current, navPending]);
+
   function confirmEntry(entryId: string) {
-    setEntries((prev) => {
-      const entry = prev.find((e) => e.id === entryId);
-      if (!entry) return prev;
-      pushLive({ source: "detection", type: "verse", label: entry.label, text: entry.text });
-      return prev.map((e) => (e.id === entryId ? { ...e, status: "confirmed" } : e));
+    // pushLive (setCurrent + the setLiveStateAction server action call) must
+    // not run inside setEntries' updater — React can invoke that updater
+    // during render, and triggering another component's setState there
+    // (the Server Action call updates router-pending state) throws "Cannot
+    // update a component while rendering a different component."
+    const entry = entries.find((e) => e.id === entryId);
+    if (!entry) return;
+    pushLive({
+      source: "detection",
+      type: "verse",
+      label: entry.label,
+      text: entry.text,
+      reference: {
+        translation: entry.translation,
+        book: entry.book,
+        chapter: entry.chapter,
+        verse: entry.verse,
+      },
     });
+    setEntries((prev) => prev.map((e) => (e.id === entryId ? { ...e, status: "confirmed" } : e)));
   }
 
   function dismissEntry(entryId: string) {
@@ -90,11 +187,23 @@ export function ControlConsole({
         const entryId = `${service.id}-${i}-${match.book}-${match.chapter}-${match.verse}`;
 
         if (match.decision === "auto-display") {
-          pushLive({ source: "detection", type: "verse", label: match.label, text: match.text });
+          pushLive({
+            source: "detection",
+            type: "verse",
+            label: match.label,
+            text: match.text,
+            reference: {
+              translation: match.translation,
+              book: match.book,
+              chapter: match.chapter,
+              verse: match.verse,
+            },
+          });
           setEntries((prev) => [
             {
               id: entryId,
               status: "confident",
+              translation: match.translation,
               book: match.book,
               chapter: match.chapter,
               verse: match.verse,
@@ -109,6 +218,7 @@ export function ControlConsole({
             {
               id: entryId,
               status: "needs-review",
+              translation: match.translation,
               book: match.book,
               chapter: match.chapter,
               verse: match.verse,
@@ -195,7 +305,16 @@ export function ControlConsole({
           <CueListPane cueItems={cueItems} activeCueId={activeCueId} onSelect={pushCueLive} />
         </div>
         <div className="overflow-hidden">
-          <LiveOutputPane current={current} next={nextCue} />
+          <LiveOutputPane
+            current={current}
+            next={nextCue}
+            activeCue={activeCue}
+            onResumeActiveCue={resumeActiveCue}
+            onNavigateVerse={navigateVerse}
+            navPending={navPending}
+          >
+            <QuickInsertPanel librarySongs={librarySongs} onPush={pushQuickLive} />
+          </LiveOutputPane>
         </div>
         <div className="overflow-hidden">
           <AiDetectedPane

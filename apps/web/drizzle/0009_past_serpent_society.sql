@@ -1,0 +1,1 @@
+ALTER TYPE "public"."live_state_source" ADD VALUE 'quick';

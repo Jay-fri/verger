@@ -5,6 +5,7 @@ export { semanticSearch, DEFAULT_TRANSLATION, type SemanticMatch } from "./seman
 export {
   resolveScripture,
   getVersesForReference,
+  getAdjacentVerse,
   type ResolveResult,
   type ResolvedVerse,
 } from "./resolve";

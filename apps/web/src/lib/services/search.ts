@@ -1,6 +1,6 @@
 "use server";
 
-import { getBook, resolveScripture } from "@verger/bible-data";
+import { getAdjacentVerse, getBook, resolveScripture } from "@verger/bible-data";
 import { requireActiveMembership } from "@/lib/auth/membership";
 
 export type VerseSearchResult = {
@@ -43,4 +43,20 @@ export async function searchVersesAction(query: string): Promise<VerseSearchResu
     }));
   }
   return [];
+}
+
+/**
+ * Backs the Control console's Previous/Next verse controls — steps one
+ * verse forward or backward from wherever is currently live, regardless of
+ * how the current verse got there (cue, AI detection, or search).
+ */
+export async function getAdjacentVerseAction(
+  current: { translation: string; book: string; chapter: number; verse: number },
+  direction: "next" | "prev",
+): Promise<VerseSearchResult | null> {
+  await requireActiveMembership();
+
+  const result = await getAdjacentVerse(current, direction, current.translation);
+  if (!result) return null;
+  return { ...result, label: label(result.book, result.chapter, result.verse) };
 }
