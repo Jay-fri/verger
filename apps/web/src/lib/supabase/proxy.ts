@@ -8,7 +8,11 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 // Role-based checks (admin/operator/volunteer) happen deeper, per-page —
 // see requireChurchRole() in src/lib/auth/membership.ts. Proxy only decides
 // "logged in or not"; it never queries the database.
-const PUBLIC_PATHS = ["/sign-in", "/sign-up", "/auth", "/invite"];
+// /stage is the Stage output route — deliberately public (see its own
+// page.tsx and drizzle/0008_live_state_realtime_and_rls.sql for why): it's
+// meant to be pointed at by vMix's Browser Source, which has no way to
+// carry a login session.
+const PUBLIC_PATHS = ["/sign-in", "/sign-up", "/auth", "/invite", "/stage"];
 
 function isPublicPath(pathname: string): boolean {
   if (pathname === "/") return true;

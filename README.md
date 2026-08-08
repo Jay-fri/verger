@@ -3,12 +3,12 @@
 A live scripture-detection tool for church media teams. See
 [verger-project-overview.md](./verger-project-overview.md) for the full product spec.
 
-This repo is at **Phase 5: the Content module**. Phase 0 (scaffolding), Phase 1 (auth, church
-accounts, roles, onboarding), Phase 2 (the Bible data layer), Phase 3 (the detection engine), and
-Phase 4 (the Control console UI) are done. This phase extends Prep and the Control console to
-handle songs, announcements, and custom text alongside scripture in one ordered cue list, per the
-overview doc's "one shared runner" design. Live speech-to-text, Realtime cross-window sync, and
-the Stage output route are still not built.
+This repo is at **Phase 6: Realtime sync**. Phase 0 (scaffolding), Phase 1 (auth, church accounts,
+roles, onboarding), Phase 2 (the Bible data layer), Phase 3 (the detection engine), Phase 4 (the
+Control console UI), and Phase 5 (the Content module) are done. This phase adds the public Stage
+output route and wires it to the Control console over Supabase Realtime, so the two can run on
+different devices/networks — the milestone where this app becomes pilotable in a real service via
+vMix's Browser Source, ahead of the NDI bridge. Live speech-to-text is still not built.
 
 ## Folder structure
 
@@ -19,9 +19,10 @@ verger/
 │       ├── src/app/dashboard/prep/     # Prep: create a service, add scripture/songs/announcements/custom text, reorder/remove
 │       ├── src/app/dashboard/library/  # Content library: create/delete songs (+ sections), announcements (+ slides), custom text
 │       ├── src/app/console/[serviceId]/ # Control console: three-pane operator screen (own top-level route, full-bleed — not the dashboard's centered layout)
+│       ├── src/app/stage/[serviceId]/  # Stage output: public, chrome-free, full-screen — what vMix's Browser Source points at
 │       ├── src/app/                    # Also: sign-up/sign-in, onboarding, invite, dashboard, settings
-│       ├── src/lib/db/           # Drizzle client + schema (churches, services, cue_items, songs, announcements, custom_texts, ...)
-│       ├── src/lib/services/     # Service/cue-item CRUD (any content type), verse search, mock-detection Server Actions
+│       ├── src/lib/db/           # Drizzle client + schema (churches, services, cue_items, songs, announcements, custom_texts, live_state, ...)
+│       ├── src/lib/services/     # Service/cue-item CRUD (any content type), verse search, mock-detection + live-state Server Actions
 │       ├── src/lib/library/      # Song/announcement/custom-text CRUD Server Actions
 │       ├── src/lib/supabase/     # Supabase clients: browser, server (cookie-bound), proxy session refresh
 │       ├── src/lib/auth/         # Session + church-membership + role-check helpers, auth Server Actions
@@ -195,6 +196,49 @@ shared runner," per the overview doc, not a separate system:
   arrived moments later and correctly took over Live Output, while "Next" stayed correctly anchored
   to the manually-selected cue throughout.
 
+## Realtime sync + Stage output (Phase 6)
+
+The Control console and a new public Stage output route now stay in sync over Supabase Realtime,
+across different devices/networks — the milestone where this app is pilotable in a real service
+via vMix's Browser Source, ahead of the Electron NDI bridge.
+
+- **Stage output** (`/stage/[serviceId]`) — bare, chrome-free, full-screen: no header, no panes, no
+  operator chrome, just the current content centered in the warm ink/parchment palette at whatever
+  size the browser source is set to (verified clean at 1920×1080). Shows a small dim "Verger"
+  wordmark when nothing is live yet, rather than a blank screen that looks broken. **Deliberately
+  public** — added to `proxy.ts`'s `PUBLIC_PATHS` and reads with no login check — because vMix's
+  Browser Source can't carry an authenticated session. The service ID (an unguessable UUID in the
+  URL) is the practical access boundary, the same trust model as a shared calendar/meeting link;
+  the content itself (a verse, a lyric line, an announcement) isn't sensitive enough to warrant
+  more than that.
+- **New table, `live_state`** — one row per service, upserted every time the Control console pushes
+  something live (cue click, AI confirm, AI auto-display, manual search push). This is the actual
+  "publish" step — there's no separate broadcast call. **Postgres Changes** (not Broadcast) is what
+  notices the write and pushes it to subscribed Stage tabs: with this app's realtime footprint (a
+  handful of pushes per service, one or two subscribers), Postgres Changes' simplicity — no custom
+  trigger function, no manual broadcast call to remember, automatically consistent with whatever's
+  in the database — outweighs Broadcast's better scaling story, which matters at subscriber counts
+  this app is nowhere near.
+- **This is the one table in the app where `anon` genuinely needs RLS access**, not just
+  defense-in-depth: the Stage page's realtime subscription connects directly from the browser with
+  no Next.js server in the loop for that leg, so the `anon`-role SELECT policy on `live_state` (see
+  `drizzle/0008_live_state_realtime_and_rls.sql`) is the actual, live-enforced authorization
+  boundary for who receives updates — plus the table needed adding to the `supabase_realtime`
+  publication, an easy-to-miss separate step from RLS.
+- **Verified with two genuinely independent browser contexts** (separate cookie jars — the closest
+  simulation available to "two different devices" without literally using two machines): an
+  authenticated Control console in one, a Stage output tab with zero session/auth state in the
+  other. Pushed two different verses live in sequence; both arrived at the unauthenticated tab via
+  the open WebSocket with no page reload. One real timing lesson from testing this: a fresh
+  subscription takes a moment to reach `SUBSCRIBED` before it starts receiving events (standard
+  pub/sub behavior, not a bug) — the initial Server Component fetch already covers "what's live
+  right now" for a normal page load, so this only matters in the sub-second window right as a Stage
+  tab is first opening.
+- **What I could verify vs. what still needs a real check**: I confirmed the page itself, the
+  cross-context realtime sync, and clean rendering at 1080p. I do not have vMix available in this
+  environment (a licensed Windows/Mac product) to literally add it as a Browser Source — that
+  confirmation is the one item in this phase's ask I'm handing back to you.
+
 ## Prerequisites
 
 - Node.js 20.9+, pnpm
@@ -250,7 +294,5 @@ pnpm db:studio      # Drizzle Studio — browse the DB in a local UI
 
 ## What's not built yet
 
-Live speech-to-text (the detection engine is still fed a mock transcript array), Realtime sync
-between the Control console and a separate Stage output route (today the console's own "Live
-output" pane is the only display), the Stage output route itself, and the Electron NDI bridge. See
-the overview doc's "Suggested build order" for what's next.
+Live speech-to-text (the detection engine is still fed a mock transcript array) and the Electron
+NDI bridge. See the overview doc's "Suggested build order" for what's next.

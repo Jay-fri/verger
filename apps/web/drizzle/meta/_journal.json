@@ -50,6 +50,20 @@
       "when": 1786141451361,
       "tag": "0006_content_library_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786146843346,
+      "tag": "0007_spooky_garia",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786146870870,
+      "tag": "0008_live_state_realtime_and_rls",
+      "breakpoints": true
     }
   ]
 }

@@ -206,6 +206,27 @@ export const cueItems = pgTable("cue_items", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const liveStateSourceEnum = pgEnum("live_state_source", ["cue", "detection", "search"]);
+
+// What's currently on screen for a service — one row per service, upserted
+// every time the Control console pushes something live (cue click, AI
+// confirm, AI auto-display, or manual search push). This table (not a
+// broadcast-only message) is the source of truth specifically so the Stage
+// output route shows the right thing immediately on load/reconnect, not
+// just on the next change — Postgres Changes both delivers the live update
+// *and* backs a plain SELECT for that initial fetch. See
+// src/app/stage/[serviceId] and src/lib/services/live-state.ts.
+export const liveState = pgTable("live_state", {
+  serviceId: uuid("service_id")
+    .primaryKey()
+    .references(() => services.id, { onDelete: "cascade" }),
+  source: liveStateSourceEnum("source").notNull(),
+  type: cueItemTypeEnum("type").notNull(),
+  label: text("label").notNull(),
+  text: text("text").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 export const churchesRelations = relations(churches, ({ many }) => ({
   members: many(churchMembers),
   invites: many(churchInvites),
@@ -218,6 +239,7 @@ export const churchesRelations = relations(churches, ({ many }) => ({
 export const servicesRelations = relations(services, ({ one, many }) => ({
   church: one(churches, { fields: [services.churchId], references: [churches.id] }),
   cueItems: many(cueItems),
+  liveState: one(liveState, { fields: [services.id], references: [liveState.serviceId] }),
 }));
 
 export const cueItemsRelations = relations(cueItems, ({ one }) => ({

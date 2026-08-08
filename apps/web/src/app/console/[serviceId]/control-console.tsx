@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRef, useState } from "react";
 import { runMockDetectionChunkAction, setServiceStatusAction } from "@/lib/services/detection";
+import { setLiveStateAction } from "@/lib/services/live-state-action";
 import type { VerseSearchResult } from "@/lib/services/search";
 import { CueListPane } from "./cue-list-pane";
 import { LiveOutputPane } from "./live-output-pane";
@@ -37,30 +38,30 @@ export function ControlConsole({
   const activeCueIndex = activeCueId ? cueItems.findIndex((c) => c.id === activeCueId) : -1;
   const nextCue = activeCueIndex >= 0 ? (cueItems[activeCueIndex + 1] ?? null) : (cueItems[0] ?? null);
 
+  // The one place "current" ever changes — updates local state immediately
+  // (so the operator's own screen never waits on a round trip) and persists
+  // to live_state, which is what actually notifies the Stage output route
+  // via Postgres Changes. Every call site that used to call setCurrent
+  // directly goes through this instead.
+  function pushLive(item: LiveItem) {
+    setCurrent(item);
+    setLiveStateAction(service.id, item).catch(() => {});
+  }
+
   function pushCueLive(item: CueItem) {
     setActiveCueId(item.id);
-    setCurrent({
-      source: "cue",
-      type: item.type,
-      label: item.label,
-      text: item.text,
-    });
+    pushLive({ source: "cue", type: item.type, label: item.label, text: item.text });
   }
 
   function pushSearchResultLive(verse: VerseSearchResult) {
-    setCurrent({ source: "search", type: "verse", label: verse.label, text: verse.text });
+    pushLive({ source: "search", type: "verse", label: verse.label, text: verse.text });
   }
 
   function confirmEntry(entryId: string) {
     setEntries((prev) => {
       const entry = prev.find((e) => e.id === entryId);
       if (!entry) return prev;
-      setCurrent({
-        source: "detection",
-        type: "verse",
-        label: entry.label,
-        text: entry.text,
-      });
+      pushLive({ source: "detection", type: "verse", label: entry.label, text: entry.text });
       return prev.map((e) => (e.id === entryId ? { ...e, status: "confirmed" } : e));
     });
   }
@@ -89,12 +90,7 @@ export function ControlConsole({
         const entryId = `${service.id}-${i}-${match.book}-${match.chapter}-${match.verse}`;
 
         if (match.decision === "auto-display") {
-          setCurrent({
-            source: "detection",
-            type: "verse",
-            label: match.label,
-            text: match.text,
-          });
+          pushLive({ source: "detection", type: "verse", label: match.label, text: match.text });
           setEntries((prev) => [
             {
               id: entryId,
@@ -160,6 +156,14 @@ export function ControlConsole({
           </div>
         </div>
         <div className="flex items-center gap-3">
+          <Link
+            href={`/stage/${service.id}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-text-primary hover:bg-background"
+          >
+            Open Stage output ↗
+          </Link>
           {sessionState === "running" && (
             <span className="flex items-center gap-1.5 text-xs text-text-secondary">
               <span className="bg-accent-gold h-1.5 w-1.5 animate-pulse rounded-full" />

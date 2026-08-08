@@ -10,23 +10,11 @@ import {
 import { getBook } from "@verger/bible-data";
 import { db } from "@/lib/db";
 import { cueItems, services } from "@/lib/db/schema";
-import { requireActiveMembership } from "@/lib/auth/membership";
+import { requireServiceAccess } from "./access";
 
 // Team-mode-shaped: conservative, since a human operator is watching the
 // queue. A future solo mode would only need to lower this one number.
 const AUTO_DISPLAY_THRESHOLD = 0.75;
-
-async function requireServiceAccess(serviceId: string) {
-  const { membership } = await requireActiveMembership();
-  if (!db) throw new Error("Database is not configured.");
-
-  const service = await db.query.services.findFirst({ where: eq(services.id, serviceId) });
-  // Not found, or belongs to a different church — same error either way.
-  if (!service || service.churchId !== membership.church.id) {
-    throw new Error("Service not found.");
-  }
-  return { service, membership };
-}
 
 export type MockDetectionMatch = {
   decision: "auto-display" | "needs-review";
