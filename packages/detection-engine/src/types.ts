@@ -1,3 +1,5 @@
+import type { ReferenceContext } from "@verger/bible-data";
+
 export type TranscriptChunk = {
   id: string;
   text: string;
@@ -73,6 +75,13 @@ export type DetectionEngineConfig = {
   outlineBoost?: number;
   /** How many semantic candidates to fetch and consider (post outline-boost re-ranking) per chunk. */
   semanticCandidates?: number;
+  /**
+   * Book/chapter carried forward from earlier in this live session, so a
+   * bare "verse 28" resolves correctly even when its chapter was stated in
+   * an earlier, separate transcript chunk — see
+   * @verger/bible-data's findAllReferences.
+   */
+  referenceContext?: ReferenceContext;
 };
 
 export const DEFAULT_MIN_SEMANTIC_SIMILARITY = 0.5;

@@ -3,16 +3,15 @@
 A live scripture-detection tool for church media teams. See
 [verger-project-overview.md](./verger-project-overview.md) for the full product spec.
 
-This repo is at **Phase 6.5: Live output verse navigation and quick-insert**. Phase 0 (scaffolding),
-Phase 1 (auth, church accounts, roles, onboarding), Phase 2 (the Bible data layer), Phase 3 (the
-detection engine), Phase 4 (the Control console UI), Phase 5 (the Content module), and Phase 6
-(realtime sync between the Control console and a public Stage output route, pilotable in a real
-service via vMix's Browser Source) are done. This phase is two usability fixes on top of Phase 6,
-prompted by piloting it: Previous/Next verse stepping in the live output (so an operator can walk
-through a passage one verse at a time regardless of what was originally matched or searched), and
-an always-available quick-insert panel for pushing custom text, a song section, or a scripture
-search live ad hoc without disturbing the operator's place in the order-of-service cue list. Live
-speech-to-text is still not built.
+This repo is at **Phase 7: Live speech-to-text integration**. Phase 0 (scaffolding), Phase 1 (auth,
+church accounts, roles, onboarding), Phase 2 (the Bible data layer), Phase 3 (the detection engine),
+Phase 4 (the Control console UI), Phase 5 (the Content module), Phase 6 (realtime sync between the
+Control console and a public Stage output route, pilotable in a real service via vMix's Browser
+Source), and Phase 6.5 (verse Previous/Next navigation + a quick-insert panel in the live output)
+are done. This phase replaces the mocked transcript feed from Phase 3 with real streaming
+transcription via AssemblyAI — mic capture in the browser, a reconnecting WebSocket session, and
+usage/cost awareness — so the detection engine now runs against what the pastor is actually saying
+instead of a fixed mock array.
 
 ## Folder structure
 
@@ -22,11 +21,12 @@ verger/
 │   └── web/                      # Next.js app (App Router, TypeScript) — the actual product
 │       ├── src/app/dashboard/prep/     # Prep: create a service, add scripture/songs/announcements/custom text, reorder/remove
 │       ├── src/app/dashboard/library/  # Content library: create/delete songs (+ sections), announcements (+ slides), custom text
-│       ├── src/app/console/[serviceId]/ # Control console: three-pane operator screen (own top-level route, full-bleed — not the dashboard's centered layout); live output includes verse Previous/Next nav + a quick-insert panel (text/song/scripture, doesn't touch cue position)
+│       ├── src/app/console/[serviceId]/ # Control console: three-pane operator screen (own top-level route, full-bleed — not the dashboard's centered layout); live output includes verse Previous/Next nav + a quick-insert panel; header runs the live AssemblyAI session (or a mock demo) — see use-live-transcription.ts
 │       ├── src/app/stage/[serviceId]/  # Stage output: public, chrome-free, full-screen — what vMix's Browser Source points at
 │       ├── src/app/                    # Also: sign-up/sign-in, onboarding, invite, dashboard, settings
+│       ├── public/audio/pcm-worklet.js # AudioWorkletProcessor: mic Float32 -> 16-bit PCM for AssemblyAI's streaming API
 │       ├── src/lib/db/           # Drizzle client + schema (churches, services, cue_items, songs, announcements, custom_texts, live_state, ...)
-│       ├── src/lib/services/     # Service/cue-item CRUD (any content type), verse search, mock-detection + live-state Server Actions
+│       ├── src/lib/services/     # Service/cue-item CRUD (any content type), verse search, detection + live-state Server Actions, AssemblyAI token minting (transcription.ts)
 │       ├── src/lib/library/      # Song/announcement/custom-text CRUD Server Actions
 │       ├── src/lib/supabase/     # Supabase clients: browser, server (cookie-bound), proxy session refresh
 │       ├── src/lib/auth/         # Session + church-membership + role-check helpers, auth Server Actions
@@ -279,11 +279,339 @@ Two usability fixes to the Control console's live output, found by actually pilo
   `packages/bible-data/src/resolve.test.ts` — the two flows above are UI interaction sequences, not
   pure functions, so live browser verification is the honest check here, same reasoning as Phase 6.
 
+## Live speech-to-text integration (Phase 7)
+
+The mocked transcript array from Phase 3 is no longer what feeds the detection engine in normal
+use — the Control console now runs a real streaming session against **AssemblyAI**
+(`wss://streaming.assemblyai.com/v3/ws`), captures the operator's mic in the browser, and pushes
+finalized transcript turns through the same `detectChunk` pipeline mock chunks used to go through.
+
+- **Token minting stays server-side** (`src/lib/services/transcription.ts`,
+  `mintAssemblyAiTokenAction`) — the real `ASSEMBLYAI_API_KEY` never reaches the browser. A
+  short-lived, one-time-use token is minted fresh for every connection attempt, including
+  reconnects, since AssemblyAI tokens are single-use by design. Gated behind
+  `requireServiceAccess` so this can't be hit by a stranger to burn the church's quota.
+- **Mic capture** (`public/audio/pcm-worklet.js` + `use-live-transcription.ts`) — an
+  `AudioWorkletProcessor` converts the mic's Float32 samples to 16-bit PCM off the main thread, in
+  ~100ms batches, over an `AudioContext` forced to 16kHz (matching what AssemblyAI's default PCM
+  encoding expects) so no explicit resampling code was needed — the Web Audio API handles it once
+  the context itself is at the target rate.
+- **The whole session lifecycle lives in one hook**, `useLiveTranscription`
+  (`src/app/console/[serviceId]/use-live-transcription.ts`), so `control-console.tsx` just renders a
+  status and gets finalized turns via a callback. States: `requesting-mic` → `connecting` →
+  `listening` → (on any unexpected close) `reconnecting` → back to `listening`, or `error` if
+  retries run out. The mic stream and `AudioContext` are kept alive across reconnects — only the
+  WebSocket itself is torn down and reopened — so recovering from a drop doesn't re-prompt for mic
+  permission.
+- **Reconnection**: any WebSocket close the app didn't itself request (network drop, an
+  AssemblyAI-side disconnect, the service's 3-hour auto-close) triggers up to 6 retries with
+  backoff (1s → 30s) before giving up and surfacing a clear, dismissable error — this is the "a
+  dropped connection mid-service should not crash the console" requirement. One deliberate
+  exception: a missing/invalid `ASSEMBLYAI_API_KEY` is detected as a config problem (not a
+  transient blip) and fails immediately instead of burning through the retry backoff first, so
+  the real cause shows up right away instead of after ~1 minute of pointless retries — verified
+  live (see below).
+- **Usage/cost awareness**: since AssemblyAI bills by WebSocket connection duration (not audio
+  volume), a live "Listening · MM:SS (~$X.XX)" readout in the console header — at the confirmed
+  ~$0.01/minute rate from the overview doc — is an accurate cost proxy, not just a vanity timer.
+  `console.info` logs a checkpoint every full minute, plus the authoritative
+  `audio_duration_seconds`/`session_duration_seconds` AssemblyAI itself reports whenever a
+  connection segment ends (visible in the browser console for after-the-fact review).
+- **The mock-transcript demo path was kept**, deliberately, as a secondary "or run mock demo"
+  text link — de-emphasized, disabled while a live session is running, and vice versa. This
+  wasn't asked for explicitly; I judged that a media team rehearsing or training a new volunteer
+  without spending AssemblyAI credits or needing a quiet room is a real, low-risk use case worth
+  keeping working code around for, rather than deleting a tested feature. Happy to remove it if
+  that's not wanted.
+- **Initial verification, before a real key existed**: mic capture + `AudioWorklet` setup
+  succeeds and doesn't crash the console; the missing-API-key path fails fast with a clear error
+  and a working "Retry" button instead of hanging or crashing; the mock-demo path still
+  auto-displayed and queued matches correctly. All via Playwright with Chromium's fake-mic device,
+  no real AssemblyAI account yet.
+
+### Real-world bugs found while piloting, and the fixes
+
+Once a real `ASSEMBLYAI_API_KEY` was in place and this got piloted for real, two rounds of bugs
+showed up — **matches were being silently dropped**, and detection was **noticeably slow, or
+missed things entirely** ("the pastor calls out a scripture and it's slow to bring it up, or
+doesn't get it at all"). Both rounds were root-caused by re-reading the actual pipeline rather than
+guessing, then confirmed fixed against the real AssemblyAI API (synthesized speech via macOS
+`say`, fed into Chromium as a fake microphone device — see "How this was verified" below).
+
+**Round 1 — dropped matches and stalled turns:**
+
+- **One match per chunk, period.** `findReference()` only ever returned the *leftmost* reference in
+  a piece of text, and `detectChunk()` only ever returned one `DetectionEvent`. The Phase 3 mock
+  transcript was deliberately written one-reference-per-chunk, so this never showed up until real
+  speech, where a single AssemblyAI "turn" routinely contains more than one reference. **Fix**:
+  `detectChunkEvents()` (`packages/detection-engine/src/detect.ts`) returns every exact reference
+  in a chunk; `detectChunk()` is now a first-match convenience wrapper over it.
+- **A turn that never finalizes never got checked at all** — AssemblyAI only finalizes a "turn" at
+  a natural pause, and detection only ran on `end_of_turn`. Superseded by Round 2's partial-
+  transcript matching below (this no longer waits for a stall at all).
+- **The local embedding model's one-time load cost** (via `@huggingface/transformers`) made the
+  *first* paraphrase match of a session noticeably slower than every match after it. **Fix**:
+  `warmUpDetectionAction` fires once when the Control console mounts.
+
+**Round 2 — the parser didn't understand *spoken* references, and detection waited too long:**
+
+- **The reference parser expected written citations, not speech.** `findReference`/
+  `findAllReferences` were built around "John 3:16" — digits, a colon, book immediately adjacent to
+  chapter/verse. Real spoken sermons say "chapter three, verse sixteen" (number *words*), spread
+  the book/chapter/verse across a sentence ("the book of Romans, chapter eight, and let's look at
+  verse twenty eight"), and sometimes state a verse with no chapter restated at all a few seconds
+  after the chapter was said. **Fix**: `packages/bible-data/src/reference-parser.ts` was rewritten
+  around a token-scanning approach: `normalizeSpokenNumbers()` converts number words to digits
+  (grammar-aware — "Romans eight twenty-eight" reads as chapter 8, verse 28, not a nonsense sum of
+  8+20+8), and `findAllReferences(text, context?)` walks the transcript handling book-then-chapter-
+  then-verse in any reasonable spoken ordering, verse-before-chapter ("verse 28 of chapter 8"), a
+  verse stated well after its chapter in the same sentence, and a bare "verse N" resolved against
+  a `{ book, chapter }` context — either established earlier in the same chunk, or carried forward
+  from a *previous* transcript chunk (`control-console.tsx` keeps this in `referenceContextRef`,
+  with a 45s TTL so a stale context from several sentences ago can't mis-resolve something
+  unrelated, like a song's own "verse 2"). 22 realistic spoken-style fixtures were written and
+  verified before touching anything downstream (`reference-parser.test.ts`).
+- **A bare chapter mention ("Romans chapter 8", verse not yet said) still needs to produce
+  *something*** — for the context-carry case above to work, the chapter has to be tracked even
+  before its verse arrives. But naively auto-displaying it (exact matches are always confidence 1)
+  would flash a guessed verse 1 on the screen the instant a chapter is named, which is wrong when —
+  the common case — a specific verse is about to follow. **Fix**: `findAllReferences` still emits a
+  whole-chapter reference (flagged `isWholeChapter: true`), but `detectChunkEvents` always routes
+  it to `needs-review` regardless of its confidence, never `auto-display`. Verified live: a
+  "Romans 8" (needs-review) entry appeared and sat harmlessly in the queue for a moment before the
+  real "Romans 8:28" (auto-display) landed once the verse was heard — never the wrong content live
+  on Stage output.
+- **Detection wasn't checking partial transcripts at all** — only finalized turns, so anything said
+  was invisible until AssemblyAI's endpointing decided the turn was over (routinely a second or
+  more after the words were actually said). **Fix**: `use-live-transcription.ts` now checks growing
+  partial transcripts too, throttled to every ~1.5s (`PARTIAL_CHECK_INTERVAL_MS`), not just at
+  `end_of_turn` — safe specifically *because* of the whole-chapter fix above, which is what stops an
+  incomplete "...chapter 3..." partial from ever flashing something wrong before the verse number
+  arrives. A `book:chapter:verse` dedup set per turn (`seenInCurrentTurnRef`) stops the same verse
+  from being re-announced as the partial keeps growing into the eventual final.
+- **Exact-before-semantic was already correctly ordered** (`detectChunkEvents` returns early on any
+  exact match, never running the embedding-based semantic search in that case) — confirmed, not a
+  bug, and now provable from the logging below rather than reading the code and hoping.
+- **Two genuinely new bugs surfaced by live testing itself, not by re-reading code:**
+  - **Audio was silently dropped during connection setup.** The token-mint + WebSocket-handshake
+    window took ~5 real seconds in testing; the AudioWorklet was already capturing mic audio during
+    that window (via `getUserMedia`, which starts immediately), but every frame was discarded
+    because the send path only fired `if (ws.readyState === WebSocket.OPEN)`. Confirmed directly: a
+    live test's first transcript began mid-sentence ("...28, we know that all things work
+    together...") — everything the synthesized voice said in roughly the first 5 seconds
+    ("Good morning church, please turn with me to the book of Romans, chapter eight, and let's look
+    at verse twenty...") was simply never sent. **Fix**: `pendingAudioRef` now buffers frames
+    (capped ~15s) whenever the socket isn't open — initial connect *or* a reconnect gap — and
+    flushes them the moment `ws.onopen` fires. Re-ran the same test after the fix: the WS log shows
+    "flushing 42 buffered audio frame(s)," and the first transcript now genuinely starts at "Good
+    morning, church."
+  - **Overlapping, unawaited detection calls queued up behind each other.** Checking partials every
+    1.5s without waiting for the previous check to resolve meant several requests could be in
+    flight at once; round trips measured 5-8 seconds even though the server reported doing its own
+    work in under 1.5s each time — the gap was queuing, not detection. **Fix**: `processingChunkRef`
+    in `control-console.tsx` skips a new *partial* check while one is already in flight (finals are
+    never skipped) — the next partial 1.5s later, or the eventual final, catches up regardless.
+    Re-verified: round trips dropped to 1.4-2.5s, tracking the server-reported time much more
+    closely.
+- **AssemblyAI configuration**: `format_turns=true` is now set (AssemblyAI punctuates/capitalizes
+  finalized turns — partials are still never formatted regardless, which is exactly why the
+  parser's own spoken-number handling above still matters) and `keyterms_prompt` word-boosts
+  transcription toward all 66 canonical Bible book names (AssemblyAI's 100-term cap, computed
+  server-side in `transcription.ts` and handed to the client alongside the token — kept out of the
+  client bundle specifically so it doesn't re-trigger the `@verger/bible-data` barrel-import
+  client-bundle issue from Phase 6/7's `live-state.ts`/`embedText` history).
+- **Latency and rejection logging, for real tuning later**: `detectChunkEvents` logs
+  `match-start`/`match-done` with elapsed ms, and a line for *every* rejected candidate — an exact
+  reference that parsed but matched zero verses, a semantic candidate below the similarity floor,
+  an alternative that lost to a better one, or a best candidate that didn't clear the auto-display
+  threshold — all server-side only (`console.info`, never reaches the browser or any UI, consistent
+  with the "no numeric confidence in the UI" rule, which is about what the *operator/congregation*
+  sees, not server logs). The client (`control-console.tsx`) logs its own trace — chunk received,
+  round trip, stage-sync — correlated to the server logs by chunk text/timing rather than a shared
+  trace ID, since there's no distributed tracing infrastructure in this app and building one wasn't
+  warranted for a single-process pair.
+
+**How this was verified**: `say` synthesized ~19s of continuous, natural spoken sermon audio
+(mixing two exact references cited with real spoken phrasing, a verbatim quote, and a deliberately
+loose/borderline paraphrase), converted to 16kHz mono PCM WAV via `afconvert`, fed into Chromium via
+`--use-file-for-fake-audio-capture` against the *real* AssemblyAI streaming endpoint — not mocked,
+not simulated. Confirmed live: both exact references (Romans 8:28, John 3:16) auto-displayed
+correctly and promptly; the borderline paraphrase landed in needs-review as Romans 8:1, with its
+full rejected-candidate list visible in the server log; the transient "Romans 8" (needs-review)
+entry appeared and was superseded cleanly once the real verse arrived; round-trip latency dropped
+from 5-8s to 1.4-2.5s after the concurrency fix; and the connection-setup audio-buffering fix was
+directly observed closing a real gap where several real seconds of speech had been silently
+discarded. Package test suites: 127 tests total (up from 96), including 22 new spoken-style
+reference fixtures and 6 `normalizeSpokenNumbers` unit tests. All QA accounts/services created for
+this were cleaned up via direct SQL afterward, same as every other phase.
+
+### Chapter-only references and scoped semantic search
+
+Reported gap: "like in 2 Corinthians 6 where Timothy said..." produced no scripture at all. Two
+related fixes, both in `packages/detection-engine/src/detect.ts` and
+`packages/bible-data/src/reference-parser.ts` / `semantic-search.ts`:
+
+- **Chapter-only references now produce a usable fallback instead of being silently discarded.**
+  `findAllReferences` already parsed "2 Corinthians 6" as a whole-chapter reference
+  (`isWholeChapter: true`, from Phase 7's earlier fix) — this part was already working. What wasn't:
+  finding it made `detectChunkEvents` return immediately with just the chapter's opening verse
+  (`2CO 6:1`, needs-review), never attempting anything smarter with the rest of the sentence.
+- **A chapter-only (or book-only) reference now scopes semantic search instead of blocking it.**
+  When the exact path finds *only* whole-chapter/book references (no specific verse), it no longer
+  short-circuits — it uses that partial reference to restrict `semanticSearch` to just the named
+  chapter (or, with no chapter, the whole book) before ranking candidates, then tries that first.
+  `semanticSearch` gained a `scope?: { book, chapter? }` param (a plain `and(eq(book), eq(chapter))`
+  addition to its `WHERE` clause) for this. If the scoped search finds something that clears the
+  similarity floor, that's what gets returned; if not, the chapter-only fallback (verse 1,
+  needs-review) is still what comes back — never nothing. The exact piloting example now resolves
+  correctly: "2 Corinthians 6" + "we shouldn't be unequally yoked with unbelievers" → **2 Corinthians
+  6:14**, not just 6:1.
+- **Scoping doesn't change any verse's own similarity score** (that's fixed by the embeddings
+  alone) — what it changes is which verses are even in the running. A paraphrase's cosine similarity
+  to the *correct* verse is identical whether searched against 18 verses or 31,000; scoping just
+  stops an unrelated, higher-scoring verse from a different book crowding out the right one within
+  the top-N results. Verified directly: "put on the new self and get rid of your old sinful ways"
+  picks a wrong verse from a different book entirely when searched unscoped, but correctly lands in
+  Ephesians 4 once scoped to the chapter the pastor had just named.
+- **A real bug found via the test suite, not code review**: the book abbreviation "Act" (for Acts)
+  collided with the ordinary English word "act" — "...as an **act** of worship" mid-sentence was
+  silently re-matched as a fresh mention of the book of Acts, overwriting the correctly-tracked
+  `{Romans, 12}` context with `{Acts, null}` and scoping a search to the wrong book with no visible
+  error. Fixed by excluding a small set of single-token abbreviations that are also common standalone
+  English words ("Is" for Isaiah, "Am" for Amos, "Act" for Acts) from the spoken scanner specifically
+  — real speech essentially never abbreviates a book this tersely out loud, that's a written-citation
+  convention. The typed manual-search box (`parseReference`) is unaffected; it can still resolve a
+  deliberately-typed "Is 40:1".
+- **Not a guarantee, by design**: some paraphrases are too indirect to resolve confidently even
+  scoped to the right chapter. In that case the chapter-only fallback from the first fix still
+  applies — verified directly with a real paraphrase ("give everything you have back to God as your
+  worship") that a full-Bible search confidently (and wrongly) resolves to an unrelated book, while
+  the Romans-12-scoped search correctly finds nothing usable and falls back to `Romans 12:1`
+  (needs-review) rather than guessing.
+- **Verified against 8 realistic partial-reference-plus-paraphrase examples** (Ephesians 6 armor of
+  God, James 1 "count it all joy", Philippians 2's kenosis passage, Romans 12's living sacrifice, a
+  book-only Ephesians mention, plus the three scoped-vs-unscoped comparisons above) — all resolving
+  to their correct, real, verified verse against the actual embedded WEB text, the same empirical
+  verification standard as the rest of this package's test suite. 140 tests total (up from 127).
+
+### Three bugs from a real live-test session: a frozen partial, unconditional latency, and non-determinism
+
+A real piloting session produced latency/rejection logs showing three concrete problems. All three
+turned out to trace back to related causes, diagnosed empirically (raw payload logging, per-stage
+timing, and repeated-call probes against the real database) before writing any fix.
+
+**Bug 1 — partial transcript appeared frozen for 49 seconds.** The reported symptom (15 consecutive
+partial events logging identical text) needed one question answered first: is AssemblyAI itself
+re-sending the same content, or is our own handling stuck? `use-live-transcription.ts` now logs the
+**raw WebSocket payload** (`[assemblyai:raw] #<seq> @<timestamp> <raw JSON>`) completely independently
+of any processed state — no parsing, no counters, just the bytes as received. A real test recording
+(74s of continuous, distinct synthesized speech, not one repeated phrase) proved AssemblyAI's own
+`transcript` field growing turn over turn exactly as expected:
+
+```
+#2  "Good morning, church."
+#3  "Good morning, church family! Let's open in prayer before we get started today. Thank you, Lord, for this"
+#4  "...Thank you, Lord, for this new day and for bringing"
+#5  "...for bringing us together as one body."
+#6  (end_of_turn) "...us together as one body."
+```
+
+So in this run the wire was never actually stalled — but the investigation surfaced a real, separate
+reliability risk worth closing defensively: the capture-side `AudioWorkletNode` was never connected to
+`audioContext.destination`. Chrome's Web Audio graph is pull-based from the destination outward, and a
+node with no path to destination has no hard guarantee it keeps being scheduled, particularly once a
+tab backgrounds — a very plausible explanation for a real stall that this test run didn't happen to
+reproduce. Fixed by routing the worklet through a zero-gain (silent) `GainNode` to destination, keeping
+it on an actively-pulled path without adding the mic's own audio back into the page. Also added
+`[audio-flow]` counters (frames produced by the worklet vs. frames actually sent over the WebSocket,
+logged every 5s) so a future stall report can show which side of the pipeline actually stopped, and a
+guard that skips re-running detection when a partial's text is byte-for-byte unchanged since the last
+check — real proof from this same test run that AssemblyAI *does* sometimes re-send identical partial
+content mid-turn (payloads #20 and #21 above were identical, 432ms apart), which used to mean a
+redundant trip through the whole matching pipeline for no new information.
+
+**Bug 2 — every chunk cost 870ms–2500ms of server processing, even for plain announcements.** Profiling
+(new `[timing]` log lines around every stage — reference parsing, the exact-match DB lookup, the
+embedding call, and the semantic DB query, each timed separately) confirmed the *logic* was already
+correct: semantic search only ever runs when the exact-match path finds nothing (a hard early return in
+`detectChunkEvents`). The cost was real, just mischaracterized — it's DB/network round-trip time, not
+semantic search running unconditionally. Real numbers from the corrected test run:
+
+| stage | n | min | max | avg |
+|---|---|---|---|---|
+| reference parsing (no DB, in-process) | 33 | 0.10ms | 1.40ms | 0.37ms |
+| exact-match DB lookup | 19 | 296ms | 1680ms | 502ms |
+| semantic DB query (warm) | 13 | 323ms | 405ms | 356ms |
+| semantic DB query (cold start) | 1 | — | 8524ms | — |
+
+Reference parsing is free, as expected. Exact-match and semantic-search paths are cleanly separated —
+neither ever both ran for the same chunk. The one 8.5s outlier was the very first semantic call of a
+fresh server process (embedding model + Postgres connection pool + HNSW index pages all cold at once);
+every later semantic call in the same run stayed under 410ms. The remaining ~300ms baseline on exact
+matches is dominated by this sandboxed environment's network round-trip to Supabase (~150-160ms
+measured directly via a bare `SELECT 1`), not query cost — the underlying lookup itself is a single
+indexed row fetch. One genuinely avoidable cost was found and fixed: `detectAgainstOutline` was
+re-querying the service's cue outline from the database on **every single chunk**, even though it
+rarely changes mid-service. `apps/web/src/lib/services/detection.ts` now caches it in-process per
+service with a 30-second TTL, cutting one full DB round trip off of every chunk after the first.
+
+**Bug 3 — identical input produced "1 match(es)" then "0 match(es)" with no code change.** Direct
+repeated-call probes against the real database settled this immediately: `detectChunkEvents` is fully
+deterministic — five consecutive calls with identical text *and* identical `referenceContext` produced
+byte-for-byte identical results, on both the exact-match path (`ROM 8:28`, 5/5) and the semantic path
+(`PHP 4:13`, confidence `0.8448`, 5/5). Varying only `referenceContext` for the same text, however,
+does change the result — which is exactly the behavior a 45-second context TTL produces once a session
+stalls long enough (Bug 1) for that TTL to expire mid-conversation: the *same words*, scoped differently
+depending on when in the stall they got (re-)processed, look indistinguishable from "random" in a
+latency log that only shows match counts. Bug 3 was downstream of Bug 1, not an independent source of
+non-determinism — fixing the stall risk and adding the unchanged-text skip (Bug 1's fixes) removes the
+condition that let context drift produce different-looking results for what was really the same input
+processed at different, uncontrolled times.
+
+**One more real bug found live-testing these fixes, same class as the "act" collision above:** the
+common English word "job" ("my job was uncertain...") matched the book of Job — Job's only alias besides
+its own full name is the abbreviation "Jb", so unlike Isaiah/Amos/Acts there's no less-collision-prone
+alternative name to fall back on. Excluded from the spoken scanner the same way, accepting the same
+tradeoff (a pastor saying "the book of Job" by name won't register via the spoken scanner — same
+limitation the "Is"/"Am"/"Act" exclusions already accept). `packages/bible-data`: 95 tests passing (up
+from 94); `packages/detection-engine`: 38 tests passing, unchanged.
+
+### "Frozen matcher input" bug report — turned out to be a parser gap, not a truncation
+
+A follow-up report described a match that never fired: raw AssemblyAI payloads showed the transcript
+growing to include "Ephesians chapter number 5, verse number 17," but every `[latency]` log line for
+that turn showed the same ~70-character snippet and `0 match(es)`, even once the reference was clearly
+present. The natural suspicion — a fixed-length slice capping what actually gets matched — turned out to
+be a red herring, confirmed by tracing the two places any `.slice(0, N)` exists in this whole path:
+`control-console.tsx`'s `[latency]` log line (`text.slice(0, 70)`, display only) and `detect.ts`'s
+`[detection]` log line (`chunk.text.slice(0, 100)`, also display only). Neither touches the value
+actually passed to `findAllReferences`/`embedText` — that's always the full, untruncated turn text. A
+direct probe against the real matcher proved it: as a simulated turn grows from 70 to 141 characters
+across six partials, the logged matcher input length grows in step every time, and the moment the
+reference completes it fires — **`EPH 5:17 (auto-display)`** — while a client-side display log using the
+70-char slice would still show the same frozen preamble throughout (that display behavior is correct and
+unrelated to matching).
+
+The real bug was in `findAllReferences` (`packages/bible-data/src/reference-parser.ts`): the scanner
+required a digit immediately after the words "chapter" and "verse" ("chapter 5", "verse 17"). A
+formal/dictation-style phrasing with a filler word — "chapter **number** 5, verse **number** 17" — put a
+non-digit token where the scanner expected one, so neither the chapter nor the verse was ever recognized
+and the reference was invisible to the parser regardless of how long the surrounding transcript grew.
+Fixed with a small `skipFillerNumber` helper that optionally skips one "number" token before checking
+for the digit, applied everywhere a chapter or verse digit is expected (including the verse-first "verse
+N of chapter M" ordering). Two regression tests added, both empirically verified against the real parser
+before being locked in: the exact reported phrasing after a long preamble, and the verse-first ordering
+with both digits fillered. `packages/bible-data`: 97 tests passing (up from 95).
+
 ## Prerequisites
 
 - Node.js 20.9+, pnpm
 - A [Supabase](https://supabase.com) project (same one from Phase 0 is fine)
 - A Google Cloud OAuth client, if you want Google sign-in (optional — email/password works without it)
+- An [AssemblyAI](https://www.assemblyai.com/app/account) account — `ASSEMBLYAI_API_KEY` in
+  `apps/web/.env.local` (Phase 7+; the Control console's live session shows a clear "not
+  configured" error and falls back to the mock demo without it, so it's optional until you want
+  real transcription)
 
 ## One-time Supabase dashboard setup
 
@@ -334,5 +662,9 @@ pnpm db:studio      # Drizzle Studio — browse the DB in a local UI
 
 ## What's not built yet
 
-Live speech-to-text (the detection engine is still fed a mock transcript array) and the Electron
-NDI bridge. See the overview doc's "Suggested build order" for what's next.
+The Electron NDI bridge. See the overview doc's "Suggested build order" for what's next. Live
+speech-to-text (Phase 7) is built and has been verified against real AssemblyAI traffic with
+synthesized real speech (see "Real-world bug found while piloting, and the fix" in the Phase 7
+section above) — still worth a real human-voice pilot in an actual service before fully trusting
+it, since synthesized speech doesn't fully stand in for a live room's audio quality, accents, or
+background noise.

@@ -24,7 +24,7 @@ Verger removes that manual step. It listens continuously, matches what's being s
 4. **Slides, lyrics, announcements, and custom text:** beyond automatic scripture detection, the media team can build a library of song lyrics, announcement slides, and one-off custom text — and run them from the same operator screen as a simple cue list, in whatever order the service needs. This runs through the same Stage output and NDI feed as the verse display, so there's one output the media team manages, not several separate tools.
 5. **After the service:** Verger can put together a simple recap — the verses used and when — for reference or reuse later.
 
-### What Verger is *not*
+### What Verger is _not_
 
 - It does not replace vMix, and it does not stream to social media itself. vMix keeps doing exactly what it already does — Verger only feeds it one more input.
 - It does not require the media team to touch a browser, a terminal, or any developer tool. They install one app (like installing any other program on their computer) and it shows up as a named source inside vMix.
@@ -39,6 +39,7 @@ Down the line, this same detection engine could power a "solo" mode for a pastor
 ## Part 2 — What this is (for development / Claude Code)
 
 ### Product name
+
 **Verger** — chosen deliberately: a verger is historically the person who manages the practical, technical side of a church service so the clergy can focus on the message. Checked for naming conflicts against existing church-presentation software (PewBeam, WayPresenter, QWorship, EasyWorship, ProPresenter, Proclaim, Loghema, WorshipTools, OpenLP, Praisenter, and others) — no collision. Domain and trademark search turned up no conflicting software product using this name.
 
 ### Core scope of this build
@@ -48,10 +49,11 @@ Verger is a **web application** used by a church media team, paired with a **des
 ### System components
 
 **1. Web app** (the actual product — Next.js)
+
 - **Prep module**: build/load a service outline ahead of time — key verses, songs, order of service. This narrows the search space for live detection.
 - **Detection engine**: consumes a live transcript stream and returns scored verse matches.
-  - *Exact-reference path*: literal citations ("John 3:16") resolve via direct lookup — no AI/semantic matching needed, near-instant.
-  - *Semantic path*: paraphrased or indirect references go through embedding-based similarity search against indexed Bible text, checked against the Prep outline first, then the full Bible if no outline match.
+  - _Exact-reference path_: literal citations ("John 3:16") resolve via direct lookup — no AI/semantic matching needed, near-instant.
+  - _Semantic path_: paraphrased or indirect references go through embedding-based similarity search against indexed Bible text, checked against the Prep outline first, then the full Bible if no outline match.
   - Every match returns a confidence score.
 - **Confidence router**: high-confidence matches can auto-display; lower-confidence matches go to an operator queue for manual confirmation. This threshold is a config value per session — not hardcoded — because it's also the single lever that will let a future "solo" mode reuse this exact engine (see below).
 - **Control console**: the operator-facing UI — live suggestion queue, one-tap confirm/override, manual search fallback, current outline view.
@@ -60,15 +62,17 @@ Verger is a **web application** used by a church media team, paired with a **des
 - **Realtime sync**: Control console and Stage output route are different windows/processes and must stay in sync over the network (not assumed to be on the same LAN) — via a managed realtime channel (Supabase Realtime, Ably, or PartyKit).
 
 **2. Desktop NDI bridge** (Electron — a separate, thin wrapper app)
+
 - Purpose: NDI is a native network protocol implemented via a native SDK; a browser tab cannot emit NDI directly. This app exists solely to bridge that gap.
 - Structure: one Electron app, two windows —
-  - A **visible window** loading the Control console (so the media team never needs to open an actual browser — this window *is* the app's UI for them).
+  - A **visible window** loading the Control console (so the media team never needs to open an actual browser — this window _is_ the app's UI for them).
   - A **hidden/offscreen window** loading the Stage output route, whose rendered frames are captured and republished as an NDI source (via a binding to the NDI SDK — e.g. the `grandiose` Node package) so it appears as a named input inside vMix.
 - This wrapper contains almost no independent logic — it consumes the same web app codebase, it does not duplicate it.
 - Packaged as a standard installer (`.exe` for Windows, matching what the media team already uses for vMix) via `electron-builder`.
 - Note: transparent/alpha-channel output (for overlay-only compositing over a live camera feed in vMix, rather than a full-screen graphic) should be tested early — NDI alpha support varies by tooling version and is a risk to validate before relying on it.
 
 **3. What is explicitly out of scope for this build**
+
 - No RTMP relay, no multistream fan-out, no direct integration with YouTube/Facebook/Instagram. vMix owns all of that downstream of the NDI input.
 - No solo/mobile pastor-facing mode or UI.
 
@@ -99,16 +103,17 @@ verger/
 
 ### Tech stack
 
-| Layer | Choice | Notes |
-|---|---|---|
-| Frontend | Next.js + Tailwind (custom theme, not default component styling) | Prep, Control console, Stage output route. Hosted on **Vercel**. |
-| Hosting & repo | **Vercel** (web app) + **GitHub** (source repo) | Standard, confirmed |
-| Database, auth, realtime sync | **Supabase** (confirmed — Postgres + Auth + Realtime, consolidated into one service) | Control console ↔ Stage output sync runs over Supabase Realtime, cross-network, not LAN-dependent. Consolidating here avoids juggling separate free tiers for DB/auth/realtime. |
-| Streaming speech-to-text | AssemblyAI (streaming API, confirmed) | Purpose-built for continuous streaming transcription — word-level timestamps and confidence scores as first-class output, which the confidence router depends on. ~$0.01/minute; a 90-minute service costs well under $1 |
-| Verse matching | Exact-match lookup (literal references) + embedding/vector search via pgvector (Supabase Postgres) over indexed Bible text; an LLM (Claude or Gemini) may assist in *reasoning* about which verse a paraphrase points to | Prep outline checked first, then full Bible. **Hard rule: the LLM may only select/rank candidate matches — it must never generate the scripture text itself.** Displayed text is always retrieved from the verified indexed database, never model-generated. This is non-negotiable given the credibility/accuracy stakes of live scripture display. |
-| Backend | Node/Fastify or Python (FastAPI) | Orchestrates STT → matching → push to Control/Stage |
-| Auth | Supabase Auth — org/church-based accounts, pastor/operator roles | |
-| Desktop bridge | Electron + `grandiose` (NDI SDK binding) + `electron-builder` | Not hosted on Vercel — Electron's windows load the Vercel-hosted web app URL directly (same pattern as Slack/Discord desktop apps). The installer itself is distributed via GitHub Releases, a separate step from web hosting. Requires accepting NDI SDK's redistribution license before shipping the installer |
+| Layer                         | Choice                                                                                                                                                                                                                   | Notes                                                                                                                                                                                                                                                                                                                                                |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Frontend                      | Next.js + Tailwind (custom theme, not default component styling)                                                                                                                                                         | Prep, Control console, Stage output route. Hosted on **Vercel**.                                                                                                                                                                                                                                                                                     |
+| Hosting & repo                | **Vercel** (web app) + **GitHub** (source repo)                                                                                                                                                                          | Standard, confirmed                                                                                                                                                                                                                                                                                                                                  |
+| Database, auth, realtime sync | **Supabase** (confirmed — Postgres + Auth + Realtime, consolidated into one service)                                                                                                                                     | Control console ↔ Stage output sync runs over Supabase Realtime, cross-network, not LAN-dependent. Consolidating here avoids juggling separate free tiers for DB/auth/realtime.                                                                                                                                                                      |
+| Streaming speech-to-text      | AssemblyAI (streaming API, confirmed)                                                                                                                                                                                    | Purpose-built for continuous streaming transcription — word-level timestamps and confidence scores as first-class output, which the confidence router depends on. ~$0.01/minute; a 90-minute service costs well under $1                                                                                                                             |
+| Verse matching                | Exact-match lookup (literal references) + embedding/vector search via pgvector (Supabase Postgres) over indexed Bible text; an LLM (Claude or Gemini) may assist in _reasoning_ about which verse a paraphrase points to | Prep outline checked first, then full Bible. **Hard rule: the LLM may only select/rank candidate matches — it must never generate the scripture text itself.** Displayed text is always retrieved from the verified indexed database, never model-generated. This is non-negotiable given the credibility/accuracy stakes of live scripture display. |
+| Backend                       | Node/Fastify or Python (FastAPI)                                                                                                                                                                                         | Orchestrates STT → matching → push to Control/Stage                                                                                                                                                                                                                                                                                                  |
+| Auth                          | Supabase Auth — org/church-based accounts, pastor/operator roles                                                                                                                                                         |                                                                                                                                                                                                                                                                                                                                                      |
+| Media asset storage           | **Cloudflare R2** (confirmed — for background images/videos and any other uploaded media)                                                                                                                                | S3-compatible, no egress fees — background assets get re-fetched by the Stage output route repeatedly through a service, so egress-free storage avoids a cost that would otherwise scale with usage, not just storage volume                                                                                                                         |
+| Desktop bridge                | Electron + `grandiose` (NDI SDK binding) + `electron-builder`                                                                                                                                                            | Not hosted on Vercel — Electron's windows load the Vercel-hosted web app URL directly (same pattern as Slack/Discord desktop apps). The installer itself is distributed via GitHub Releases, a separate step from web hosting. Requires accepting NDI SDK's redistribution license before shipping the installer                                     |
 
 ### Auxiliary AI assistant features (separate from the detection engine)
 
@@ -121,11 +126,12 @@ These are a different risk category from live scripture display and should be ar
 
 ### Design direction (visual identity)
 
-*This section is for development/Claude Code — not part of what the media director needs to review.*
+_This section is for development/Claude Code — not part of what the media director needs to review._
 
 **Reference pattern studied**: EasyWorship's interface is a proven, fast-to-learn loop — a schedule pane (order of service) on one side, click an item to see its slides, click a slide to send it live. A volunteer learns this in about 20 minutes. ProPresenter is more powerful but has a steeper multi-panel learning curve. Verger's Control console should follow EasyWorship's shallow, three-step logic for anything that overlaps with familiar territory (the cue list, the live/next preview) — and reserve visual distinctiveness for the one genuinely new concept: the AI detection queue.
 
 **Control console layout** — three panes:
+
 1. **Order of service** (left) — the full cue list (verses, songs, announcements, custom text), same logic as any competitor's schedule pane. Active item highlighted.
 2. **Live output** (center) — current slide large and unambiguous, next slide below it. Mirrors the Stage output route exactly.
 3. **AI detected** (right) — kept visually separate from the cue list rather than blended in, since this is the new capability nobody else has. Each detected match shows a confidence state, not a raw percentage:
@@ -135,34 +141,74 @@ These are a different risk category from live scripture display and should be ar
 
 **Color palette** — warm ink/parchment identity, deliberately not the cold blue-gradient look common across AI products and most competitors in this category:
 
-*Dark mode (primary — the Control console runs in a dim booth environment):*
-| Role | Hex |
-|---|---|
-| Base background | `#17140F` |
-| Surface / card | `#221D17` |
-| Border | `#3A322A` |
-| Text primary | `#F3ECDD` |
-| Text secondary | `#A89B87` |
-| Accent gold (brand, active/live item) | `#D6A34C` |
-| Confident match | `#7C9257` |
-| Needs review | `#C97A3D` |
-| Live / on-air indicator | `#B5473A` |
+_Dark mode (primary — the Control console runs in a dim booth environment):_
 
-*Light mode (Prep/admin screens, daytime use):*
-| Role | Hex |
-|---|---|
-| Base background | `#F7F1E6` |
-| Surface / card | `#FFFCF5` |
-| Border | `#DED2B9` |
-| Text primary | `#241F19` |
-| Text secondary | `#6E6455` |
-| Accent gold | `#A9782A` |
-| Confident match | `#5F7A3D` |
-| Needs review | `#A85F27` |
+| Role                                  | Hex       |
+| ------------------------------------- | --------- |
+| Base background                       | `#17140F` |
+| Surface / card                        | `#221D17` |
+| Border                                | `#3A322A` |
+| Text primary                          | `#F3ECDD` |
+| Text secondary                        | `#A89B87` |
+| Accent gold (brand, active/live item) | `#D6A34C` |
+| Confident match                       | `#7C9257` |
+| Needs review                          | `#C97A3D` |
+| Live / on-air indicator               | `#B5473A` |
+
+_Light mode (Prep/admin screens, daytime use):_
+
+| Role                    | Hex       |
+| ----------------------- | --------- |
+| Base background         | `#F7F1E6` |
+| Surface / card          | `#FFFCF5` |
+| Border                  | `#DED2B9` |
+| Text primary            | `#241F19` |
+| Text secondary          | `#6E6455` |
+| Accent gold             | `#A9782A` |
+| Confident match         | `#5F7A3D` |
+| Needs review            | `#A85F27` |
 | Live / on-air indicator | `#96392D` |
 
 **Iconography**: avoid default outline icon packs (Feather, Lucide, etc.) — every competitor in this category uses one of these, and it's the fastest way to look generic. Prefer a small custom icon set built around manuscript/typographic motifs (a quill-nib cursor, a marginalia mark, an open-fold shape) rather than stock outline icons, especially for the handful of icons that appear constantly (live indicator, confirm/override, cue list item types).
 
+### Feature audit and competitive mapping
+
+_Living reference — updated as features are built or newly identified from competitor research. Status markers: ✅ built, 🔜 identified but not yet built, ⏳ planned/sequenced, ❌ deliberately out of scope._
+
+**✅ Built**
+
+- Auth, church accounts, roles (Supabase Auth) — modeled on Proclaim's team-login pattern
+- Bible data layer: exact-reference + semantic search, retrieval-only (never model-generated) — matches PewBeam's semantic matching, with an added Prep-outline confidence boost PewBeam does not describe
+- Detection engine (mocked transcript): confidence-scored, outline-boosted matches
+- Control console (three-pane: order of service / live output / AI detected) — the familiar-pattern panes copy EasyWorship's proven schedule→slide→live loop; the AI panel is the novel addition
+- Content module: songs/announcements/custom text in one mixed cue list, matching EasyWorship/Proclaim's unified builder
+- Realtime sync + Stage output route, cross-network (not LAN-dependent) — a real edge over local-display-only competitors
+- Verse navigation (next/previous through a chapter) — directly validated against Proclaim's "Next Verse" button, built independently before this was found in research
+- Quick-insert panel (ad-hoc push without disturbing cue list position) — matches ProPresenter/Proclaim's "edit on the fly," with an explicit non-disruption guarantee they don't document
+
+**🔜 Identified, not yet built**
+
+- Session-level Auto/Manual display mode toggle (PewBeam: pick once per service — Auto for rehearsal, Manual for real services) — simpler mental model than a raw confidence threshold
+- Minimum display time / debounce on the live output, preventing flicker when new candidates appear rapidly (PewBeam)
+- Clear/black/logo panic buttons (universal across ProPresenter/EasyWorship)
+- Stage confidence monitor — a second, pastor-facing output route, separate from the audience/vMix Stage output (ProPresenter's Stage Display, Proclaim's confidence monitor) — also a natural stepping stone toward future solo mode
+- Operator → stage messaging, visible only on the confidence monitor (ProPresenter)
+- Countdown/elapsed timers, ideally with color shifts near zero (ProPresenter/Proclaim)
+- Pre-service / warm-up / service / post-service loop structure for the order of service, instead of one flat cue list (Proclaim's four-part model)
+- Saved song arrangements — confirm the data model supports reusing a song's slide order automatically next time it's used, not just storing lyrics once (Proclaim)
+- Sermon transcript → captions/recap: AssemblyAI transcription is already running for detection; turning it into captions or a post-service recap costs little extra, versus Proclaim charging ~$1/sermon for the equivalent
+- Custom image/video slide backgrounds — church-uploaded static images or looping muted video behind any slide type, with a legibility scrim over busy backgrounds. Initially miscategorized as out of scope alongside video compositing below; corrected — this is a basic rendering feature (an image or `<video>` element on the Stage output page), not a production-compositing feature, and it's expected parity with every competitor in this category.
+
+**⏳ Planned, correctly sequenced (see build phases doc)**
+Live AssemblyAI integration, Electron/NDI bridge, Gemini assistant module.
+
+**❌ Deliberately out of scope — confirmed decisions, not gaps**
+
+- Direct social multistreaming (vMix owns this downstream)
+- Real-time multi-layer video compositing / live camera switching (ProPresenter's production depth — vMix owns this downstream; distinct from simple slide backgrounds, which are in scope above)
+- A built-in curated library of stock motion backgrounds (a content-licensing and hosting investment — church-uploaded backgrounds cover the actual need for now)
+- Multi-screen lobby/sanctuary routing (vMix downstream)
+- CCLI SongSelect integration (real need eventually, low priority pre-launch)
 
 ### Future extensibility (not built now, but designed for)
 
@@ -171,4 +217,4 @@ These are a different risk category from live scripture display and should be ar
 
 ---
 
-*Document prepared as project context for development. Please review Part 1 and confirm the workflow matches how your team actually operates day-to-day — especially the Prep step and how the operator queue should behave when Verger is unsure of a match.*
+_Document prepared as project context for development. Please review Part 1 and confirm the workflow matches how your team actually operates day-to-day — especially the Prep step and how the operator queue should behave when Verger is unsure of a match._
