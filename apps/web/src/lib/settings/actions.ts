@@ -2,11 +2,42 @@
 
 import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
+import { BIBLE_TRANSLATIONS } from "@verger/shared-types";
 import { db } from "@/lib/db";
 import { churches } from "@/lib/db/schema";
 import { requireActiveMembership } from "@/lib/auth/membership";
 
 export type SettingsActionState = { error: string | null };
+
+const TRANSLATION_CODES = new Set<string>(BIBLE_TRANSLATIONS.map((t) => t.code));
+
+/**
+ * Changes the church's default translation — what a new Control console
+ * session starts on (the operator can still switch live, per-session, from
+ * there; this only changes the starting point for sessions after this).
+ * Doesn't touch any service already running.
+ */
+export async function updateChurchDefaultTranslationAction(
+  _prevState: SettingsActionState,
+  formData: FormData,
+): Promise<SettingsActionState> {
+  const { membership } = await requireActiveMembership();
+  if (membership.role !== "admin") {
+    return { error: "Only admins can change the default translation." };
+  }
+  if (!db) {
+    return { error: "Database is not configured." };
+  }
+
+  const translation = String(formData.get("translation") ?? "");
+  if (!TRANSLATION_CODES.has(translation)) {
+    return { error: "Choose a translation." };
+  }
+
+  await db.update(churches).set({ defaultTranslation: translation }).where(eq(churches.id, membership.church.id));
+  revalidatePath("/dashboard/settings");
+  return { error: null };
+}
 
 // Rough cap matching the client-side check in logo-upload-form.tsx (500KB
 // of image data becomes ~666KB once base64-encoded) plus headroom for the

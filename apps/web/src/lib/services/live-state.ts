@@ -23,6 +23,15 @@ export type LiveStateInput = {
   nextLabel?: string | null;
   nextText?: string | null;
   nextType?: CueItemType | null;
+  // Verse-only, null for every other cue type — what makes the Control
+  // console's translation switcher a plain reference re-lookup instead of
+  // needing detection to run again (see changeDisplayTranslation in
+  // control-console.tsx). Optional for the same reason as next*: a caller
+  // that isn't pushing verse content at all doesn't need to say so.
+  translation?: string | null;
+  book?: string | null;
+  chapter?: number | null;
+  verse?: number | null;
 };
 
 // The full row, including fields the audience Stage output deliberately
@@ -35,6 +44,10 @@ export type LiveStateRow = {
   label: string;
   text: string;
   mode: LiveStateMode;
+  translation: string | null;
+  book: string | null;
+  chapter: number | null;
+  verse: number | null;
   nextLabel: string | null;
   nextText: string | null;
   nextType: CueItemType | null;
@@ -66,6 +79,10 @@ export async function getLiveState(serviceId: string): Promise<LiveStateRow | nu
     label: row.label,
     text: row.text,
     mode: row.mode,
+    translation: row.translation,
+    book: row.book,
+    chapter: row.chapter,
+    verse: row.verse,
     nextLabel: row.nextLabel,
     nextText: row.nextText,
     nextType: row.nextType,

@@ -15,17 +15,25 @@ export const INVITE_STATUSES = ["pending", "accepted", "revoked"] as const;
 export type InviteStatus = (typeof INVITE_STATUSES)[number];
 
 /**
- * Placeholder translation list for the church creation / settings dropdown.
- * Real supported translations land with the Bible data layer — this is only
- * enough to make the picker functional today.
+ * Every translation actually ingested into the `verses` table (see
+ * packages/bible-data/src/ingest/) — public domain, so none of them raise a
+ * licensing question during development or production. WEB is also the one
+ * "matching" translation detection/semantic search runs against (it's the
+ * only one with embeddings — see run-embed.ts); the other three exist for
+ * DISPLAY only, resolved by canonical reference after a match is already
+ * found (see the Control console's translation switcher).
+ *
+ * A licensed modern translation (NIV, ESV, NASB, NLT, CSB, etc.) needs its
+ * own rights/licensing check with the publisher before it could be added
+ * here — bolls.life happens to serve those too (for its own app), but
+ * that's not a redistribution license for this app. Don't add one of those
+ * codes to this list without that clearance sorted first.
  */
 export const BIBLE_TRANSLATIONS = [
-  { code: "ESV", label: "English Standard Version (ESV)" },
-  { code: "NIV", label: "New International Version (NIV)" },
-  { code: "KJV", label: "King James Version (KJV)" },
-  { code: "NASB", label: "New American Standard Bible (NASB)" },
-  { code: "NLT", label: "New Living Translation (NLT)" },
-  { code: "CSB", label: "Christian Standard Bible (CSB)" },
+  { code: "WEB", label: "World English Bible (WEB)", license: "public-domain" },
+  { code: "KJV", label: "King James Version (KJV)", license: "public-domain" },
+  { code: "ASV", label: "American Standard Version (ASV)", license: "public-domain" },
+  { code: "YLT", label: "Young's Literal Translation (YLT)", license: "public-domain" },
 ] as const;
 export type BibleTranslationCode = (typeof BIBLE_TRANSLATIONS)[number]["code"];
 

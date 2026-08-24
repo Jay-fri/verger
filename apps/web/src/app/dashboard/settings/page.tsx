@@ -5,6 +5,7 @@ import { churchInvites, churchMembers } from "@/lib/db/schema";
 import { RoleBadge } from "@/components/ui";
 import { InviteMemberForm } from "./invite-member-form";
 import { LogoUploadForm } from "./logo-upload-form";
+import { TranslationForm } from "./translation-form";
 
 export default async function SettingsPage() {
   const { membership } = await requireActiveMembership();
@@ -40,11 +41,24 @@ export default async function SettingsPage() {
             <dt className="text-text-secondary">Name</dt>
             <dd className="text-text-primary">{membership.church.name}</dd>
           </div>
-          <div className="flex justify-between">
-            <dt className="text-text-secondary">Default translation</dt>
-            <dd className="text-text-primary">{membership.church.defaultTranslation}</dd>
-          </div>
+          {!isAdmin && (
+            <div className="flex justify-between">
+              <dt className="text-text-secondary">Default translation</dt>
+              <dd className="text-text-primary">{membership.church.defaultTranslation}</dd>
+            </div>
+          )}
         </dl>
+
+        {isAdmin ? (
+          <div className="mt-6 border-t border-border pt-4">
+            <TranslationForm currentTranslation={membership.church.defaultTranslation} />
+            <p className="mt-2 text-xs text-text-secondary">
+              What new Control console sessions start on — every session can still switch translation
+              live from there. Only the four public-domain translations above are ingested; a licensed
+              translation (NIV, ESV, etc.) needs its own publisher clearance before it could be added.
+            </p>
+          </div>
+        ) : null}
 
         {isAdmin ? (
           <div className="mt-6 border-t border-border pt-4">

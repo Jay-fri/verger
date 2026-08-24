@@ -15,10 +15,13 @@ export function VerseSearch({
   onSelect,
   placeholder = "Search a reference or paraphrase…",
   selectLabel = "Add",
+  translation,
 }: {
   onSelect: (verse: VerseSearchResult) => void;
   placeholder?: string;
   selectLabel?: string;
+  /** Which translation results are displayed in — omit to use the matching translation (WEB). */
+  translation?: string;
 }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<VerseSearchResult[]>([]);
@@ -35,7 +38,7 @@ export function VerseSearch({
     setResults([]);
     setSearched(false);
     startTransition(async () => {
-      const found = await searchVersesAction(q);
+      const found = await searchVersesAction(q, translation);
       setResults(found);
       setSearched(true);
     });

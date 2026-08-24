@@ -25,12 +25,14 @@ export function OutlineEditor({
   librarySongs,
   libraryAnnouncements,
   libraryCustomTexts,
+  defaultTranslation,
 }: {
   service: Service;
   initialCueItems: CueItem[];
   librarySongs: LibrarySong[];
   libraryAnnouncements: LibraryAnnouncement[];
   libraryCustomTexts: LibraryCustomText[];
+  defaultTranslation: string;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -75,6 +77,7 @@ export function OutlineEditor({
             librarySongs={librarySongs}
             libraryAnnouncements={libraryAnnouncements}
             libraryCustomTexts={libraryCustomTexts}
+            translation={defaultTranslation}
           />
         </div>
       </section>

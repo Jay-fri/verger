@@ -78,6 +78,13 @@
       "when": 1786210308743,
       "tag": "0010_hot_red_ghost",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1786223459277,
+      "tag": "0011_glossy_magneto",
+      "breakpoints": true
     }
   ]
 }

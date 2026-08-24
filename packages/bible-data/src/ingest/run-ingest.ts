@@ -4,13 +4,22 @@ config({ path: ".env.local" });
 const { sql } = await import("drizzle-orm");
 const { getDb } = await import("../db");
 const { verses } = await import("../db/schema");
-const { fetchWebTranslation } = await import("./fetch-web");
+const { fetchTranslation } = await import("./fetch-translation");
+
+// `pnpm ingest` (no args) ingests WEB, the matching translation, same as
+// always. `pnpm ingest -- KJV` (or ASV/YLT) ingests one of the other
+// public-domain translations for DISPLAY only — see the README for why
+// only WEB gets embedded (packages/bible-data/src/ingest/run-embed.ts is
+// scoped to it) and the licensing flag on adding anything beyond the four
+// public-domain codes this app currently uses.
+const translationCode = (process.argv[2] ?? "WEB").toUpperCase();
 
 async function main() {
   const db = getDb();
   let totalInserted = 0;
 
-  await fetchWebTranslation(async (chapterVerses, progress) => {
+  console.log(`Ingesting ${translationCode} from bolls.life...`);
+  await fetchTranslation(translationCode, async (chapterVerses, progress) => {
     if (chapterVerses.length === 0) return;
 
     // Idempotent: re-running the ingest just refreshes text for existing

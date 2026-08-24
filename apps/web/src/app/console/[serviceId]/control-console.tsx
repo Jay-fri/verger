@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import type { ReferenceContext } from "@verger/bible-data";
+import { BIBLE_TRANSLATIONS } from "@verger/shared-types";
 import {
   runLiveDetectionChunkAction,
   runMockDetectionChunkAction,
@@ -17,7 +18,11 @@ import {
   setOperatorMessageAction,
 } from "@/lib/services/live-state-action";
 import type { LiveStateMode } from "@/lib/services/live-state";
-import { getAdjacentVerseAction, type VerseSearchResult } from "@/lib/services/search";
+import {
+  getAdjacentVerseAction,
+  getVerseInTranslationAction,
+  type VerseSearchResult,
+} from "@/lib/services/search";
 import { sortBySectionThenPosition, computeNextCue } from "@/lib/services/cue-sections";
 import { CueListPane } from "./cue-list-pane";
 import { LiveOutputPane } from "./live-output-pane";
@@ -66,11 +71,14 @@ export function ControlConsole({
   cueItems: rawCueItems,
   librarySongs,
   role,
+  defaultTranslation,
 }: {
   service: Service;
   cueItems: CueItem[];
   librarySongs: LibrarySong[];
   role: string;
+  /** The church's default translation — the session starts on this, but the switcher below can change it any time, for the rest of the session only. */
+  defaultTranslation: string;
 }) {
   // Sorted once here (section order, then position) — every consumer below
   // (CueListPane, next-cue computation, navigation) relies on this order
@@ -85,6 +93,12 @@ export function ControlConsole({
   const [navPending, setNavPending] = useState(false);
   const [displayMode, setDisplayModeState] = useState<"auto" | "manual">(service.displayMode);
   const [operatorMessage, setOperatorMessage] = useState("");
+  // Session-level — starts on the church's default, switchable any time for
+  // the rest of the session (unlike Auto/Manual, this is never locked once
+  // a session starts; see the switcher UI below). Read by every detection/
+  // search call this component makes, and drives changeDisplayTranslation's
+  // instant re-fetch-and-push of whatever's currently live.
+  const [displayTranslation, setDisplayTranslationState] = useState(defaultTranslation);
   const cancelledRef = useRef(false);
   const liveChunkCounterRef = useRef(0);
   // Verses already surfaced for the turn currently in progress (book:chapter:verse
@@ -148,7 +162,7 @@ export function ControlConsole({
 
     let result: Awaited<ReturnType<typeof runLiveDetectionChunkAction>>;
     try {
-      result = await runLiveDetectionChunkAction(service.id, text, currentReferenceContext());
+      result = await runLiveDetectionChunkAction(service.id, text, displayTranslation, currentReferenceContext());
     } finally {
       processingChunkRef.current = false;
     }
@@ -202,8 +216,21 @@ export function ControlConsole({
   // Stage confidence monitor is currently showing as "Next" untouched,
   // since only the order-of-service position — not what happens to be live
   // right now — determines what's next.
-  function pushLive(item: LiveItem, next?: { label: string; text: string; type: CueItem["type"] } | null) {
-    setCurrent({ ...item, mode: "content" });
+  //
+  // `preserveMode` is only ever true for changeDisplayTranslation's re-push
+  // below: switching translation while Clear/Black/Logo is engaged should
+  // update the underlying verse for whenever the operator resumes content,
+  // not silently un-black the stage as a side effect of an unrelated
+  // action. Every other push (a cue, a search result, a confirm) is a
+  // deliberate return to real content, so it keeps the normal
+  // mode-always-resets-to-content behavior.
+  function pushLive(
+    item: LiveItem,
+    next?: { label: string; text: string; type: CueItem["type"] } | null,
+    preserveMode = false,
+  ) {
+    const mode = preserveMode ? (current?.mode ?? "content") : "content";
+    setCurrent({ ...item, mode });
     lastPushedAtRef.current = Date.now();
     const t0 = performance.now();
     setLiveStateAction(service.id, {
@@ -211,7 +238,16 @@ export function ControlConsole({
       type: item.type,
       label: item.label,
       text: item.text,
-      mode: "content", // a normal content push always clears any earlier Clear/Black/Logo panic state
+      mode,
+      // Verse-only — null for every other cue type, same as cue_items'
+      // own verse-only fields. This is what changeDisplayTranslation
+      // reads back (via live_state, on a future page load) and what makes
+      // a translation switch a plain reference re-lookup rather than
+      // needing detection to run again.
+      translation: item.reference?.translation ?? null,
+      book: item.reference?.book ?? null,
+      chapter: item.reference?.chapter ?? null,
+      verse: item.reference?.verse ?? null,
       ...(next !== undefined
         ? { nextLabel: next?.label ?? null, nextText: next?.text ?? null, nextType: next?.type ?? null }
         : {}),
@@ -220,18 +256,50 @@ export function ControlConsole({
       .catch(() => {});
   }
 
-  function pushCueLive(item: CueItem) {
+  // A verse cue caches its text at add-time in Prep, in whatever
+  // translation was active there — same content-caching philosophy as
+  // every other cue type. But "future pushes [respect the session
+  // translation] for the rest of the session" (per the switcher's spec)
+  // has to include cue clicks too, not just AI matches/search, or clicking
+  // a verse cue after switching translation would silently revert to
+  // whatever the cue happened to be built in. So a verse cue whose cached
+  // translation doesn't match the session's current displayTranslation
+  // gets the same decoupled reference re-lookup changeDisplayTranslation
+  // uses — never detection, just the plain lookup.
+  async function pushCueLive(item: CueItem) {
     setActiveCueId(item.id);
     const upcoming = computeNextCue(cueItems, item.id);
+    const next = upcoming ? { label: upcoming.label, text: upcoming.text, type: upcoming.type } : null;
+
+    const ref = verseReferenceOf(item);
+    if (ref && ref.translation !== displayTranslation) {
+      const fetched = await getVerseInTranslationAction(
+        { book: ref.book, chapter: ref.chapter, verse: ref.verse },
+        displayTranslation,
+      );
+      if (fetched) {
+        pushLive(
+          {
+            source: "cue",
+            type: item.type,
+            label: fetched.label,
+            text: fetched.text,
+            reference: {
+              translation: fetched.translation,
+              book: fetched.book,
+              chapter: fetched.chapter,
+              verse: fetched.verse,
+            },
+          },
+          next,
+        );
+        return;
+      }
+    }
+
     pushLive(
-      {
-        source: "cue",
-        type: item.type,
-        label: item.label,
-        text: item.text,
-        reference: verseReferenceOf(item),
-      },
-      upcoming ? { label: upcoming.label, text: upcoming.text, type: upcoming.type } : null,
+      { source: "cue", type: item.type, label: item.label, text: item.text, reference: ref },
+      next,
     );
   }
 
@@ -272,6 +340,46 @@ export function ControlConsole({
     setCurrent((prev) => (prev ? { ...prev, mode } : { source: "quick", type: "custom_text", label: "", text: "", reference: null, mode }));
     lastPushedAtRef.current = Date.now();
     setLiveStateModeAction(service.id, mode).catch(() => {});
+  }
+
+  // Switchable any time, mid-session, unlike Auto/Manual — see the
+  // switcher UI below. Never touches detection: if a verse is currently
+  // live, this re-fetches that exact (book, chapter, verse) reference in
+  // the newly chosen translation and re-pushes it, the same plain lookup
+  // getAdjacentVerseAction already does for Previous/Next verse. Future
+  // pushes (a new cue, a new search, a new AI match) pick up the new
+  // displayTranslation value on their own, no separate propagation needed.
+  async function changeDisplayTranslation(translation: string) {
+    setDisplayTranslationState(translation);
+    const ref = current?.reference;
+    if (!ref) return;
+
+    const t0 = performance.now();
+    const fetched = await getVerseInTranslationAction(
+      { book: ref.book, chapter: ref.chapter, verse: ref.verse },
+      translation,
+    );
+    console.info(
+      `[translation] re-fetched ${ref.book} ${ref.chapter}:${ref.verse} in ${translation} — ` +
+        `${(performance.now() - t0).toFixed(0)}ms, no detection involved`,
+    );
+    if (!fetched) return;
+
+    pushLive(
+      {
+        ...current,
+        text: fetched.text,
+        label: fetched.label,
+        reference: {
+          translation: fetched.translation,
+          book: fetched.book,
+          chapter: fetched.chapter,
+          verse: fetched.verse,
+        },
+      },
+      undefined,
+      true, // preserveMode — see pushLive's doc comment
+    );
   }
 
   function sendOperatorMessage() {
@@ -437,7 +545,7 @@ export function ControlConsole({
       if (cancelledRef.current) break;
 
       setCurrentChunkText(null);
-      const result = await runMockDetectionChunkAction(service.id, i);
+      const result = await runMockDetectionChunkAction(service.id, i, displayTranslation);
       if (cancelledRef.current) break;
 
       setCurrentChunkText(result.chunkText || null);
@@ -506,6 +614,24 @@ export function ControlConsole({
           </div>
         </div>
         <div className="flex items-center gap-3">
+          {/* Unlike Auto/Manual, switchable any time — mid-session, mid-
+              verse, no lock. Applies instantly to whatever's currently
+              live (a plain reference re-fetch, not a re-detection) and to
+              every future push for the rest of the session. */}
+          <label className="flex items-center gap-1.5 text-xs font-medium text-text-secondary">
+            Translation
+            <select
+              value={displayTranslation}
+              onChange={(e) => changeDisplayTranslation(e.target.value)}
+              className="rounded-lg border border-border bg-background px-2 py-1 text-text-primary focus:border-accent-gold focus:ring-1 focus:ring-accent-gold focus:outline-none"
+            >
+              {BIBLE_TRANSLATIONS.map((t) => (
+                <option key={t.code} value={t.code}>
+                  {t.code}
+                </option>
+              ))}
+            </select>
+          </label>
           {/* Auto/Manual is chosen once, when a session starts — locked once
               a mock or live session is actually running, so it can't be
               changed mid-session and mean something different for matches
@@ -636,7 +762,7 @@ export function ControlConsole({
             onSendOperatorMessage={sendOperatorMessage}
             onClearOperatorMessage={clearOperatorMessage}
           >
-            <QuickInsertPanel librarySongs={librarySongs} onPush={pushQuickLive} />
+            <QuickInsertPanel librarySongs={librarySongs} onPush={pushQuickLive} translation={displayTranslation} />
           </LiveOutputPane>
         </div>
         <div className="overflow-hidden">
@@ -646,6 +772,7 @@ export function ControlConsole({
             onConfirm={confirmEntry}
             onDismiss={dismissEntry}
             onManualSelect={pushSearchResultLive}
+            translation={displayTranslation}
           />
         </div>
       </div>

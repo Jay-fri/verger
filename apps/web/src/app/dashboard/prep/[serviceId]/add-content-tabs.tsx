@@ -36,11 +36,14 @@ export function AddContentTabs({
   librarySongs,
   libraryAnnouncements,
   libraryCustomTexts,
+  translation,
 }: {
   serviceId: string;
   librarySongs: LibrarySong[];
   libraryAnnouncements: LibraryAnnouncement[];
   libraryCustomTexts: LibraryCustomText[];
+  /** The church's default translation — Prep has no live session, so there's no per-session switcher here. */
+  translation: string;
 }) {
   const [tab, setTab] = useState<Tab>("Scripture");
   const [section, setSection] = useState<CueSection>("service");
@@ -85,6 +88,7 @@ export function AddContentTabs({
         {tab === "Scripture" && (
           <VerseSearch
             selectLabel="Add to outline"
+            translation={translation}
             onSelect={(verse) =>
               startTransition(async () => {
                 await addCueItemAction(serviceId, section, verse);

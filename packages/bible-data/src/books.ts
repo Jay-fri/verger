@@ -17,7 +17,7 @@ export type BookMeta = {
 
 // Order matters: it's the canonical Bible order, and ingestion maps 1-indexed
 // position in this array directly to bolls.life's bookid (verified to match
-// 1-66 for the standard Protestant canon — see src/ingest/fetch-web.ts).
+// 1-66 for the standard Protestant canon — see src/ingest/fetch-translation.ts).
 export const BOOKS: BookMeta[] = [
   { code: "GEN", name: "Genesis", testament: "OT", aliases: ["Gen", "Ge", "Gn"] },
   { code: "EXO", name: "Exodus", testament: "OT", aliases: ["Exod", "Exo", "Ex"] },

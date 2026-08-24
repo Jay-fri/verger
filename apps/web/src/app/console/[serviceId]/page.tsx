@@ -45,6 +45,7 @@ export default async function ConsolePage({
       cueItems={outline}
       librarySongs={librarySongs}
       role={membership.role}
+      defaultTranslation={membership.church.defaultTranslation}
     />
   );
 }

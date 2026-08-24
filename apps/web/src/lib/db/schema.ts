@@ -52,7 +52,13 @@ export const profiles = pgTable("profiles", {
 export const churches = pgTable("churches", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
-  defaultTranslation: text("default_translation").notNull().default("ESV"),
+  // WEB (World English Bible) — public domain and always available, unlike
+  // the placeholder "ESV" default this column briefly shipped with (ESV
+  // isn't ingested and would silently 500 downstream). See
+  // @verger/shared-types' BIBLE_TRANSLATIONS for the full list of ingested,
+  // public-domain translations this can be set to. Editable post-onboarding
+  // in Settings — see updateChurchDefaultTranslationAction.
+  defaultTranslation: text("default_translation").notNull().default("WEB"),
   // A data: URL (base64-encoded image), not a Storage bucket reference —
   // deliberate simplification: this avoids a manual Supabase Storage bucket
   // creation step, at the cost of not being a great fit for large images.
@@ -311,6 +317,18 @@ export const liveState = pgTable("live_state", {
   type: cueItemTypeEnum("type").notNull(),
   label: text("label").notNull(),
   text: text("text").notNull(),
+  // Verse-only, nullable for every other type — same pattern as cue_items'
+  // own verse-only fields. What makes multi-translation switching possible
+  // without re-running detection: the Control console's translation
+  // switcher re-fetches this exact (book, chapter, verse) in the newly
+  // chosen translation and re-pushes it — a plain reference lookup, not a
+  // match. translation here is always whichever translation `text` is
+  // CURRENTLY displayed in (updated on every switch), not necessarily the
+  // church's default or the matching translation.
+  translation: text("translation"),
+  book: text("book"),
+  chapter: integer("chapter"),
+  verse: integer("verse"),
   mode: liveStateModeEnum("mode").notNull().default("content"),
   nextLabel: text("next_label"),
   nextText: text("next_text"),

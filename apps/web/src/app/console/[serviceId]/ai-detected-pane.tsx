@@ -23,12 +23,14 @@ export function AiDetectedPane({
   onConfirm,
   onDismiss,
   onManualSelect,
+  translation,
 }: {
   entries: DetectedEntry[];
   currentChunkText: string | null;
   onConfirm: (entryId: string) => void;
   onDismiss: (entryId: string) => void;
   onManualSelect: (verse: VerseSearchResult) => void;
+  translation: string;
 }) {
   return (
     <div className="flex h-full flex-col">
@@ -39,7 +41,12 @@ export function AiDetectedPane({
       </div>
 
       <div className="border-b border-border p-4">
-        <VerseSearch onSelect={onManualSelect} selectLabel="Push live" placeholder="Manual search…" />
+        <VerseSearch
+          onSelect={onManualSelect}
+          selectLabel="Push live"
+          placeholder="Manual search…"
+          translation={translation}
+        />
       </div>
 
       {currentChunkText && (

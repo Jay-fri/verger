@@ -8,7 +8,13 @@ import {
   type DetectionEngineConfig,
   type OutlineVerseRef,
 } from "@verger/detection-engine";
-import { embedText, getBook, type ReferenceContext } from "@verger/bible-data";
+import {
+  embedText,
+  getBook,
+  getVersesForReference,
+  DEFAULT_TRANSLATION,
+  type ReferenceContext,
+} from "@verger/bible-data";
 import { db } from "@/lib/db";
 import { cueItems, services } from "@/lib/db/schema";
 import { requireServiceAccess } from "./access";
@@ -84,15 +90,55 @@ type DetectAgainstOutlineResult = {
 };
 
 /**
+ * Re-fetches one already-matched verse's text in a different translation,
+ * purely by its canonical (book, chapter, verse) reference — no detection,
+ * no embeddings, just the same plain lookup getVersesForReference always
+ * does. Falls back to the matching-translation text unchanged if the
+ * display translation somehow has no row for this reference (shouldn't
+ * happen for the canonical 66-book text every ingested translation covers,
+ * but this is defensive, not load-bearing).
+ */
+async function fetchInDisplayTranslation(
+  v: { book: string; chapter: number; verse: number; translation: string; text: string },
+  displayTranslation: string,
+): Promise<{ translation: string; text: string }> {
+  if (displayTranslation === v.translation) return v;
+  const [row] = await getVersesForReference(
+    { book: v.book, chapter: v.chapter, verseStart: v.verse, verseEnd: v.verse },
+    displayTranslation,
+  );
+  return row ?? v;
+}
+
+/**
  * Shared by both the mock-transcript path (Phase 4) and the live AssemblyAI
  * path (Phase 7) — runs one chunk of text through the detection engine using
  * this service's cue list (verse cues only) as the outline boost, and
  * flattens every match the same way for both callers.
+ *
+ * Matching (both the exact-reference lookup and the embedding/semantic
+ * search) always runs against DEFAULT_TRANSLATION (WEB) — detectChunkEvents
+ * is never told otherwise, on purpose. WEB is the only translation with
+ * embeddings (see run-embed.ts), so semantic search has no choice anyway;
+ * exact-match *could* run against any translation, but keeping it on the
+ * same one everywhere is simpler and means a match's confidence never
+ * depends on which translation happens to be selected for display.
+ *
+ * Every match detectChunkEvents returns is treated as a canonical reference
+ * first (book/chapter/verse) and matching-translation text second — the
+ * text is only ever used to know what got matched, not what gets shown.
+ * Displaying it in `displayTranslation` is a completely separate lookup,
+ * keyed by that reference, run here after matching is already done. This
+ * is also exactly what the Control console's translation switcher reuses
+ * (fetchInDisplayTranslation, exported below) to update whatever's
+ * currently live when the operator changes translation mid-session,
+ * without re-running detection at all.
  */
 async function detectAgainstOutline(
   serviceId: string,
   chunkId: string,
   text: string,
+  displayTranslation: string,
   referenceContext?: ReferenceContext,
 ): Promise<DetectAgainstOutlineResult> {
   const outline = await getCachedOutline(serviceId);
@@ -104,18 +150,21 @@ async function detectAgainstOutline(
   };
   const { events, context } = await detectChunkEvents({ id: chunkId, text }, config);
 
-  const matches = events.map((event) => {
-    const v = event.best.verses[0];
-    return {
-      decision: event.decision,
-      book: v.book,
-      chapter: v.chapter,
-      verse: v.verse,
-      translation: v.translation,
-      text: v.text,
-      label: `${getBook(v.book)?.name ?? v.book} ${v.chapter}:${v.verse}`,
-    };
-  });
+  const matches = await Promise.all(
+    events.map(async (event) => {
+      const v = event.best.verses[0];
+      const displayed = await fetchInDisplayTranslation(v, displayTranslation);
+      return {
+        decision: event.decision,
+        book: v.book,
+        chapter: v.chapter,
+        verse: v.verse,
+        translation: displayed.translation,
+        text: displayed.text,
+        label: `${getBook(v.book)?.name ?? v.book} ${v.chapter}:${v.verse}`,
+      };
+    }),
+  );
 
   return { matches, context };
 }
@@ -129,6 +178,7 @@ async function detectAgainstOutline(
 export async function runMockDetectionChunkAction(
   serviceId: string,
   chunkIndex: number,
+  displayTranslation: string = DEFAULT_TRANSLATION,
 ): Promise<MockDetectionResult> {
   await requireServiceAccess(serviceId);
 
@@ -137,7 +187,7 @@ export async function runMockDetectionChunkAction(
     return { chunkIndex, chunkText: "", matches: [], isLastChunk: true };
   }
 
-  const { matches } = await detectAgainstOutline(serviceId, chunk.id, chunk.text);
+  const { matches } = await detectAgainstOutline(serviceId, chunk.id, chunk.text, displayTranslation);
 
   return {
     chunkIndex,
@@ -165,11 +215,12 @@ export type LiveDetectionResult = {
 export async function runLiveDetectionChunkAction(
   serviceId: string,
   text: string,
+  displayTranslation: string = DEFAULT_TRANSLATION,
   context?: ReferenceContext,
 ): Promise<LiveDetectionResult> {
   await requireServiceAccess(serviceId);
   const startedAt = Date.now();
-  const result = await detectAgainstOutline(serviceId, crypto.randomUUID(), text, context);
+  const result = await detectAgainstOutline(serviceId, crypto.randomUUID(), text, displayTranslation, context);
   return {
     chunkText: text,
     matches: result.matches,

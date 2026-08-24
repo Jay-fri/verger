@@ -26,9 +26,11 @@ type PushableItem = Omit<LiveItem, "source">;
 export function QuickInsertPanel({
   librarySongs,
   onPush,
+  translation,
 }: {
   librarySongs: LibrarySong[];
   onPush: (item: PushableItem) => void;
+  translation: string;
 }) {
   const [tab, setTab] = useState<Tab>("Text");
 
@@ -81,6 +83,7 @@ export function QuickInsertPanel({
           <VerseSearch
             selectLabel="Push live"
             placeholder="Search a reference or paraphrase…"
+            translation={translation}
             onSelect={(verse: VerseSearchResult) =>
               onPush({
                 type: "verse",

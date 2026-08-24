@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { getAdjacentVerse, resolveScripture } from "./resolve";
+import { getAdjacentVerse, getVersesForReference, resolveScripture } from "./resolve";
+import { parseReference } from "./reference-parser";
 
 // Integration tests against the real ingested WEB translation + real
 // embeddings — this is the "verifiably correct before anything else builds
@@ -67,6 +68,61 @@ describe("resolveScripture — exact references", () => {
     // on the raw text rather than returning an empty exact result.
     const result = await resolveScripture("Genesis 99:1");
     expect(result.method).not.toBe("exact");
+  });
+});
+
+// The multi-translation phase: WEB stays the one "matching" translation
+// (the only one embedded — see run-embed.ts), but every ingested
+// translation (KJV/ASV/YLT, all public domain — see run-ingest.ts) must
+// resolve the exact same canonical reference on request, with genuinely
+// different wording, not the same WEB text relabeled. Real, verified text
+// (not guessed) — each of these was checked against the actual ingested
+// rows before being locked in here.
+describe("getVersesForReference — multiple translations", () => {
+  const johnThreeSixteen = parseReference("John 3:16")!;
+
+  it("resolves the same reference with different real text per translation", async () => {
+    const [web] = await getVersesForReference(johnThreeSixteen, "WEB");
+    const [kjv] = await getVersesForReference(johnThreeSixteen, "KJV");
+    const [asv] = await getVersesForReference(johnThreeSixteen, "ASV");
+    const [ylt] = await getVersesForReference(johnThreeSixteen, "YLT");
+
+    expect(web.text).toContain("eternal life");
+    expect(kjv.text).toContain("everlasting life");
+    expect(asv.text).toContain("eternal life");
+    expect(ylt.text).toContain("age-during");
+
+    // Same canonical verse, four different translation labels — the point
+    // of this whole feature: one reference, several possible display texts.
+    for (const row of [web, kjv, asv, ylt]) {
+      expect(row).toMatchObject({ book: "JHN", chapter: 3, verse: 16 });
+    }
+
+    // Genuinely distinct wording, not the same text stamped with four
+    // different translation codes.
+    const distinctTexts = new Set([web.text, kjv.text, asv.text, ylt.text]);
+    expect(distinctTexts.size).toBe(4);
+  });
+
+  it("strips inline Strong's-number/footnote annotations from KJV/ASV, not just their tags", async () => {
+    // Real bug found ingesting these: bolls.life serves KJV/ASV with <S>
+    // Strong's-number spans and <sup> footnotes inline; naively stripping
+    // just the tag delimiters left the numbers as literal text glued onto
+    // the preceding word with no space (e.g. "For1063 God2316"). Asserting
+    // there's no digit-immediately-after-a-letter anywhere in the verse is
+    // a direct regression check for that specific failure mode.
+    const [kjv] = await getVersesForReference(johnThreeSixteen, "KJV");
+    const [asv] = await getVersesForReference(johnThreeSixteen, "ASV");
+    expect(kjv.text).not.toMatch(/[a-zA-Z]\d/);
+    expect(asv.text).not.toMatch(/[a-zA-Z]\d/);
+  });
+
+  it("resolveScripture threads a non-default translation through to exact-match text", async () => {
+    const result = await resolveScripture("Philippians 4:13", { translation: "KJV" });
+    expect(result.method).toBe("exact");
+    if (result.method !== "exact") throw new Error("unreachable");
+    expect(result.verses[0].translation).toBe("KJV");
+    expect(result.verses[0].text).toContain("I can do all things through Christ");
   });
 });
 

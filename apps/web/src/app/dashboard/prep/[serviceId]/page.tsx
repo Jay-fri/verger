@@ -67,6 +67,7 @@ export default async function ServiceOutlinePage({
       librarySongs={librarySongs}
       libraryAnnouncements={libraryAnnouncements}
       libraryCustomTexts={libraryCustomTexts}
+      defaultTranslation={membership.church.defaultTranslation}
     />
   );
 }

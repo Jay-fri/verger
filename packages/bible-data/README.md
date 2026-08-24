@@ -22,26 +22,47 @@ audio — this package is testable entirely via its own test suite and scripts, 
   it parsed but matched zero rows — e.g. "Genesis 99:1").
 - `src/ingest/` — one-time data loading scripts (see below).
 
-## Translation
+## Translations
 
-Ingests the **World English Bible (WEB)** — public domain, which sidesteps licensing questions
-during development. Source: [bolls.life](https://bolls.life)'s public JSON API, which serves the
-standard 66-book Protestant canon (bolls.life also lists Apocryphal books under higher book IDs;
-the ingest script filters to IDs 1-66 only).
+Ingests four **public-domain** translations, which sidesteps licensing questions entirely —
+**World English Bible (WEB)**, **King James Version (KJV)**, **American Standard Version (ASV)**,
+and **Young's Literal Translation (YLT)**. Source for all four:
+[bolls.life](https://bolls.life)'s public JSON API, which serves the standard 66-book Protestant
+canon under each translation's own short code (bolls.life also lists Apocryphal books under
+higher book IDs; the ingest script filters to IDs 1-66 only, and re-verifies book order/count per
+translation — see the Strong's-number note below for why "per translation," not just once).
 
-**A licensed modern translation (NIV, ESV, etc.) needs its own rights/licensing check with the
-publisher before production use** — this is flagged per the project overview doc. Swapping in a
-second translation later means adding rows with a different `translation` code; the schema
-already supports multiple translations coexisting (unique constraint is on
-`(translation, book, chapter, verse)`).
+**WEB is the one "matching" translation** — the only one with embeddings (`run-embed.ts` is
+explicitly scoped to it via `DEFAULT_TRANSLATION`), since detection/semantic search need to run
+against one consistent vector space. KJV/ASV/YLT exist for **display only**: resolved by
+canonical `(book, chapter, verse)` reference after a match is already found in WEB, never
+searched themselves. See the root README's "Multiple translations, switchable live" section for
+how `apps/web` wires this decoupling into the Control console's live translation switcher.
+
+**A licensed modern translation (NIV, ESV, NASB, NLT, CSB, etc.) needs its own rights/licensing
+check with the publisher before production use** — this is flagged per the project overview doc,
+and enforced in code via `BIBLE_TRANSLATIONS` in `packages/shared-types`, which only ever lists
+translations actually ingested here. bolls.life happens to serve those other codes too (for its
+own app) — that's not a redistribution license for this one. Adding a fifth translation later is
+just `pnpm ingest <CODE>` with a new bolls.life short code; the schema already supports
+multiple translations coexisting (unique constraint is on `(translation, book, chapter, verse)`).
+
+**Real bug found ingesting KJV/ASV**: bolls.life serves both with inline Strong's-number
+(`<S>1063</S>`) and footnote (`<sup>...</sup>`) annotations baked directly into the verse text.
+The original `cleanText()` only stripped tag delimiters, not their content, leaving numbers glued
+onto the preceding word with no space (`"For1063 God2316"` — every word, not an edge case). Fixed
+by stripping those two tags as whole spans (delimiters *and* content) before the generic
+formatting-tag strip that still correctly keeps WEB's occasional `<b>` inner text. Verified against
+the full dataset: zero rows in either translation match `/[a-zA-Z]\d/` post-fix.
 
 ## Setup
 
 ```bash
 cp .env.example .env.local   # same Supabase Postgres project as apps/web — copy DATABASE_URL from there
 pnpm db:generate && pnpm db:migrate   # creates the `verses` table + pgvector extension
-pnpm ingest    # fetches and stores the full WEB translation (~31k verses, ~1-2 min)
-pnpm embed     # generates + stores embeddings for every verse (resumable if interrupted)
+pnpm ingest              # fetches and stores WEB (~31k verses, ~1-2 min) — the matching translation
+pnpm ingest KJV       # (or ASV / YLT) — display-only, no embedding step needed for these
+pnpm embed               # generates + stores embeddings for WEB only (resumable if interrupted)
 ```
 
 After both scripts finish, apply the HNSW vector index migration

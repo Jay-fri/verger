@@ -3,15 +3,17 @@
 A live scripture-detection tool for church media teams. See
 [verger-project-overview.md](./verger-project-overview.md) for the full product spec.
 
-This repo is at **Phase 7: Live speech-to-text integration**. Phase 0 (scaffolding), Phase 1 (auth,
-church accounts, roles, onboarding), Phase 2 (the Bible data layer), Phase 3 (the detection engine),
-Phase 4 (the Control console UI), Phase 5 (the Content module), Phase 6 (realtime sync between the
-Control console and a public Stage output route, pilotable in a real service via vMix's Browser
-Source), and Phase 6.5 (verse Previous/Next navigation + a quick-insert panel in the live output)
-are done. This phase replaces the mocked transcript feed from Phase 3 with real streaming
-transcription via AssemblyAI — mic capture in the browser, a reconnecting WebSocket session, and
-usage/cost awareness — so the detection engine now runs against what the pastor is actually saying
-instead of a fixed mock array.
+This repo is at **Phase 9: multiple translations, switchable live**. Phase 0 (scaffolding), Phase 1
+(auth, church accounts, roles, onboarding), Phase 2 (the Bible data layer), Phase 3 (the detection
+engine), Phase 4 (the Control console UI), Phase 5 (the Content module), Phase 6 (realtime sync
+between the Control console and a public Stage output route, pilotable in a real service via vMix's
+Browser Source), Phase 6.5 (verse Previous/Next navigation + a quick-insert panel in the live output),
+Phase 7 (real streaming transcription via AssemblyAI, replacing the mocked transcript feed), and
+Phase 8 (a batch of competitive-audit features — session Auto/Manual display mode, a minimum-display-
+time debounce, Clear/Black/Logo panic buttons, a Stage confidence monitor, operator-to-stage
+messaging, order-of-service sections, saved song arrangements) are done. This phase adds three more
+public-domain translations (KJV, ASV, YLT, alongside WEB) and a live translation switcher in the
+Control console — see "Multiple translations, switchable live" below.
 
 ## Folder structure
 
@@ -36,7 +38,7 @@ verger/
 │       ├── src/proxy.ts          # Next.js 16 "proxy" (formerly middleware) — session refresh + auth gate
 │       └── drizzle/              # Generated + custom SQL migrations (drizzle-kit)
 ├── packages/
-│   ├── bible-data/                 # Indexed WEB translation (~31k verses), exact-ref parser, pgvector semantic search
+│   ├── bible-data/                 # Indexed WEB/KJV/ASV/YLT translations (~31k verses each), exact-ref parser, pgvector semantic search
 │   ├── detection-engine/           # Transcript-chunk -> scored match events; confidence scoring + auto-display/needs-review routing
 │   └── shared-types/               # ChurchRole, invite status, translation list, role-hierarchy logic (+ tests)
 └── infra/                          # Deploy/environment notes
@@ -95,10 +97,11 @@ not a client-side-hidden button).
 
 `packages/bible-data` is self-contained — see its own README for the full picture. Short version:
 
-- Translation: **World English Bible (WEB)**, public domain, sourced from
+- Translations: **WEB, KJV, ASV, YLT** — all public domain, sourced from
   [bolls.life](https://bolls.life)'s API — chosen specifically to avoid licensing questions during
   development. A licensed modern translation (NIV, ESV, etc.) needs its own rights check with the
-  publisher before production use.
+  publisher before production use. See "Multiple translations, switchable live" below for how WEB
+  stays the one translation matching/detection runs against while the other three are display-only.
 - Semantic search embeddings are generated **locally** (`Xenova/all-MiniLM-L6-v2` via
   `@huggingface/transformers`, runs on-device via ONNX) — no API key, no per-call cost.
 - `resolveScripture(input)` is the function later phases (the detection engine) will call: exact
@@ -727,6 +730,88 @@ the live-tested screenshot and finding the amber message panel simply wasn't the
 "Now" to `flex-3` (still the largest section, but bounded) with `overflow-y-auto` for genuinely long
 content, and `shrink-0` on the header/Next/message sections so they're never squeezed to zero regardless
 of viewport height.
+
+## Multiple translations, switchable live (Phase 9)
+
+**Three more public-domain translations, alongside WEB**: KJV (King James Version, 1769), ASV (American
+Standard Version, 1901), and YLT (Young's Literal Translation, 1898) — all ingested from bolls.life the
+same way WEB was, via a now-generalized `pnpm ingest <CODE>` (`packages/bible-data/src/ingest/`,
+`fetch-web.ts` renamed to `fetch-translation.ts` since it's no longer WEB-specific). `verses.translation`
+already had no schema barrier to this (a plain `text` column, unique on `(translation, book, chapter,
+verse)`) — the actual gap was entirely in `apps/web`, which never threaded any translation choice into
+the Bible data layer's already-translation-aware functions at all. **As with WEB, these three are public
+domain, which is exactly why they were chosen — a licensed modern translation (NIV, ESV, NASB, NLT, CSB,
+etc.) still needs its own rights/licensing check with the publisher before it could be added; bolls.life
+happens to serve those too for its own app, but that's not a redistribution license for this one.** See
+`BIBLE_TRANSLATIONS` in `packages/shared-types` for the enforced list.
+
+**A real data-quality bug found ingesting KJV/ASV**: bolls.life serves both with inline Strong's-number
+annotations (`<S>1063</S>`) and footnotes (`<sup>...</sup>`) baked into the verse text. The existing
+`cleanText()` only stripped tag *delimiters*, not their content, so numbers were left glued directly onto
+the preceding word with no space — every single word in the verse, not an edge case: `"For1063 God2316 so
+3779 loved25 the world2889"`. Fixed by stripping `<S>...</S>` and `<sup>...</sup>` as whole spans
+(delimiters *and* content) before the generic tag-strip pass, which still correctly keeps inner text for
+WEB's occasional `<b>` formatting tags. Verified against the full ingested dataset, not just a spot check:
+zero rows in either translation still match `/[a-zA-Z]\d/` (a letter immediately followed by a digit —
+the exact shape of the bug). A second, much smaller quirk: YLT's book list names Psalms "Psalm" (singular)
+where every other translation says "Psalms" — the book-order sanity check that guards against bolls.life
+ever silently reordering books was tightened to fold that kind of pluralization difference rather than
+fail on it, without weakening what it's actually protecting against (book *order*, via `bookid` — the name
+was always just a human-readable cross-check on top of that).
+
+**Matching (detection + semantic search) stays on exactly one translation, always — WEB.** It's the only
+one with embeddings (`run-embed.ts` is now explicitly scoped to it, so a future re-run never wastes ~31k
+vectors per translation embedding rows nothing ever queries), so semantic search has no other option, and
+exact-match stays on the same one for consistency: a match's confidence never depends on which translation
+happens to be selected for display. `detectChunkEvents` itself (`packages/detection-engine`) needed **zero
+changes** — it already returned every match as a canonical `(book, chapter, verse)` reference plus
+matching-translation text, exactly the shape this needed.
+
+**Displaying a match is a completely separate, decoupled lookup, keyed by that reference.** Both
+`detectAgainstOutline` (detection) and `searchVersesAction` (manual search) now do a second pass after
+matching: for each result, if the caller's requested `displayTranslation` differs from the matching
+translation, re-fetch that exact reference's text via `getVersesForReference` — skipped entirely when they
+already match, the common case. This is the same one-line-different pattern used everywhere a reference
+needs to change translation, including the Control console's live switcher (below) and Previous/Next verse
+navigation (already translation-aware from Phase 6.5, unchanged).
+
+**The Control console's translation switcher** — a dropdown in the header, next to Auto/Manual, but
+*not* subject to Auto/Manual's idle-only lock: switchable any time, mid-session, mid-verse, per the
+feature spec. Session-level React state (`displayTranslation`), starting from the church's default
+(`churches.defaultTranslation` — its DB default was quietly wrong, `'ESV'`, a translation never ingested;
+fixed to `'WEB'`, always available). Switching does three things, all client-driven:
+1. Every future detection/search/cue-push call passes the new translation from then on.
+2. If a verse is currently live, `changeDisplayTranslation` re-fetches that exact reference in the new
+   translation (`getVerseInTranslationAction`, a thin wrapper over `getVersesForReference` — no detection,
+   no search, just the lookup) and re-pushes it. **This is the core acceptance test**: push a verse live,
+   flip the dropdown, watch the Stage output update to the same verse in the new translation. Live-verified
+   end to end — pushed John 3:16 (WEB), then switched to KJV, then YLT, screenshotting the audience Stage
+   output after each. The only client-side log lines during either switch: `[translation] re-fetched JHN
+   3:16 in KJV — 684ms, no detection involved` and the matching `stage-sync` confirmation — grepping the
+   full server log across the whole test window for `[detection]`/`[timing]`/`match-start` (the tags every
+   real detection call always logs) returns **zero matches**, direct proof the switch never touches
+   detection.
+3. If Clear/Black/Logo is currently engaged, switching translation updates the underlying verse for
+   whenever the operator resumes content, but does *not* silently un-black the stage as a side effect —
+   `pushLive` gained a `preserveMode` flag specifically for this call site, since every other call to it
+   (a cue, a search result, a confirm) is a deliberate return to real content and should keep resetting
+   panic mode as before.
+
+A verse **cue** clicked after a translation switch also honors the session's current translation (a
+Prep-built cue's cached text is otherwise fixed at whatever translation was active when it was added,
+same content-caching philosophy as every other cue type) — `pushCueLive` does the same decoupled
+re-lookup `changeDisplayTranslation` does when a cue's cached translation doesn't match the session's
+current one, so "future pushes for the rest of the session" (per the feature spec) genuinely covers every
+push path, not just AI matches and manual search.
+
+**Church settings gained an edit form** for the default translation (previously write-once at onboarding,
+display-only afterward) — admin-only, same pattern as the logo upload form. Changes only what *new*
+sessions start on; a session already running keeps whatever the operator has it set to.
+
+`packages/bible-data`: 100 tests passing (up from 97) — new coverage resolves the same reference across
+all four translations and asserts genuinely distinct wording (not the same text relabeled), the Strong's-
+number regression check above, and `resolveScripture`'s `opts.translation` threading through to exact-
+match text.
 
 ## Prerequisites
 
