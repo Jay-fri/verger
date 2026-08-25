@@ -896,11 +896,35 @@ pnpm format         # prettier --write .
 pnpm db:studio      # Drizzle Studio — browse the DB in a local UI
 ```
 
+## Desktop NDI bridge
+
+`apps/desktop` — the Electron app described in the overview doc's "Desktop NDI bridge" section:
+a visible window loading the Control console plus a hidden/offscreen window loading the Stage
+output route, whose frames are captured and republished as an NDI source for vMix. Full detail —
+architecture, the license/attribution requirements this satisfies, real bugs found in the
+`grandiose` NDI binding and in Windows CI along the way, and exactly what's verified vs. still
+open — lives in [apps/desktop/README.md](apps/desktop/README.md); summary here:
+
+- **Verified**: dual-window lifecycle, steady frame capture at a declared rate (not just
+  content-driven repaints), a live NDI source confirmed both in-process and visually in NDI Video
+  Monitor, and — most recently — the alpha/transparency *sending* path: the Stage route's new
+  `?bg=transparent` mode (for overlay-only compositing over a live camera feed, vs. the default
+  opaque full-screen-graphic mode) produces genuinely varying 0-255 alpha data, confirmed by
+  sampling a captured frame's raw bytes directly, not just visual inspection. A Windows installer
+  builds successfully via GitHub Actions CI (`windows-2022` runner — `windows-latest` currently
+  hits two real, unrelated CI-breaking bugs, see the desktop README).
+- **Not yet verified**: whether vMix actually *composites* that alpha correctly (NDI alpha support
+  has historically varied by tooling version — this is a known risk, not assumed safe just because
+  the sending side is correct), and whether the built installer actually installs and runs on a
+  clean machine. Both need a real Windows machine with vMix installed.
+
 ## What's not built yet
 
-The Electron NDI bridge. See the overview doc's "Suggested build order" for what's next. Live
-speech-to-text (Phase 7) is built and has been verified against real AssemblyAI traffic with
-synthesized real speech (see "Real-world bug found while piloting, and the fix" in the Phase 7
-section above) — still worth a real human-voice pilot in an actual service before fully trusting
-it, since synthesized speech doesn't fully stand in for a live room's audio quality, accents, or
-background noise.
+The assistant module (help/FAQ chat + ad-hoc lookup, Gemini-based) — explicitly lowest priority,
+gated on Phases 0-8 being solid first, which per the "Desktop NDI bridge" section above isn't
+fully true yet (two checkpoints still need a real Windows+vMix machine). Live speech-to-text
+(Phase 7) is built and has been verified against real AssemblyAI traffic with synthesized real
+speech (see "Real-world bug found while piloting, and the fix" in the Phase 7 section above) —
+still worth a real human-voice pilot in an actual service before fully trusting it, since
+synthesized speech doesn't fully stand in for a live room's audio quality, accents, or background
+noise.

@@ -14,12 +14,35 @@ export function StageDisplay({
   serviceId,
   initialLiveItem,
   churchLogoDataUrl,
+  transparent,
 }: {
   serviceId: string;
   initialLiveItem: LiveStateRow | null;
   churchLogoDataUrl: string | null;
+  transparent: boolean;
 }) {
   const [item, setItem] = useState<StageState | null>(initialLiveItem);
+
+  // CSS "transparent" on this component's own root div only reveals
+  // whatever's *behind* it in the page — which is still the root layout's
+  // opaque `body { background: var(--color-background) }` (globals.css),
+  // applied to every route. Real alpha-channel output (what the NDI
+  // bridge's offscreen capture needs) requires nothing opaque anywhere in
+  // the stack, all the way up. Scoped to this one route/instance — restored
+  // on unmount so navigating away (or the non-transparent default) never
+  // leaks into any other page.
+  useEffect(() => {
+    if (!transparent) return;
+    const { body, documentElement: html } = document;
+    const prevBody = body.style.background;
+    const prevHtml = html.style.background;
+    body.style.background = "transparent";
+    html.style.background = "transparent";
+    return () => {
+      body.style.background = prevBody;
+      html.style.background = prevHtml;
+    };
+  }, [transparent]);
 
   useEffect(() => {
     const supabase = createSupabaseBrowserClient();
@@ -63,13 +86,19 @@ export function StageDisplay({
     };
   }, [serviceId]);
 
+  // Every other mode/state uses this — "black" is the one deliberate
+  // exception (below): its whole purpose is a hard, opaque cut, which
+  // becoming transparent would defeat (it'd just reveal the camera feed
+  // underneath instead of blocking it).
+  const bgClass = transparent ? "bg-transparent" : "bg-background";
+
   if (item?.mode === "black") {
     return <div className="h-screen w-screen bg-black" />;
   }
 
   if (item?.mode === "logo") {
     return (
-      <div className="flex h-screen w-screen items-center justify-center bg-background">
+      <div className={`flex h-screen w-screen items-center justify-center ${bgClass}`}>
         {churchLogoDataUrl ? (
           // A data: URL, not an optimizable remote asset — next/image's loader doesn't apply here.
           // eslint-disable-next-line @next/next/no-img-element
@@ -88,12 +117,12 @@ export function StageDisplay({
   // a wordmark that could read as a glitch. The placeholder is reserved for
   // "no session has pushed anything live yet at all."
   if (item?.mode === "clear") {
-    return <div className="h-screen w-screen bg-background" />;
+    return <div className={`h-screen w-screen ${bgClass}`} />;
   }
 
   if (!item) {
     return (
-      <div className="flex h-screen w-screen items-center justify-center bg-background">
+      <div className={`flex h-screen w-screen items-center justify-center ${bgClass}`}>
         <p className="text-sm font-medium tracking-[0.3em] text-text-secondary/40 uppercase">
           Verger
         </p>
@@ -102,7 +131,7 @@ export function StageDisplay({
   }
 
   return (
-    <div className="flex h-screen w-screen flex-col items-center justify-center bg-background px-16 text-center">
+    <div className={`flex h-screen w-screen flex-col items-center justify-center px-16 text-center ${bgClass}`}>
       <p className="text-3xl leading-snug text-balance text-text-primary sm:text-5xl md:text-6xl">
         {item.text}
       </p>

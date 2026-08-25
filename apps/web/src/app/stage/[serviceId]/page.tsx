@@ -16,10 +16,13 @@ export const dynamic = "force-dynamic";
 // the realtime subscription itself.
 export default async function StagePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ serviceId: string }>;
+  searchParams: Promise<{ bg?: string }>;
 }) {
   const { serviceId } = await params;
+  const { bg } = await searchParams;
 
   if (!db) {
     notFound();
@@ -40,6 +43,11 @@ export default async function StagePage({
       serviceId={serviceId}
       initialLiveItem={initialLiveItem}
       churchLogoDataUrl={service.church.logoDataUrl}
+      // ?bg=transparent — the alpha/overlay-compositing path (desktop NDI
+      // bridge, overlay mode) vs. the default opaque path (vMix Browser
+      // Source as a full-screen graphic, or any plain browser view). Default
+      // stays opaque so nothing about existing usage changes.
+      transparent={bg === "transparent"}
     />
   );
 }
