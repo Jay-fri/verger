@@ -3,9 +3,13 @@
 import {
   getAdjacentVerse,
   getBook,
+  getChaptersForBook,
+  getVersesForChapter,
   getVersesForReference,
   resolveScripture,
+  BOOKS,
   DEFAULT_TRANSLATION,
+  type BookMeta,
 } from "@verger/bible-data";
 import { requireActiveMembership } from "@/lib/auth/membership";
 
@@ -108,4 +112,27 @@ export async function getAdjacentVerseAction(
   const result = await getAdjacentVerse(current, direction, current.translation);
   if (!result) return null;
   return { ...result, label: label(result.book, result.chapter, result.verse) };
+}
+
+/** Static book list (OT/NT, canonical order) — the browse picker's first step. No DB round trip. */
+export async function listBooksAction(): Promise<BookMeta[]> {
+  await requireActiveMembership();
+  return BOOKS;
+}
+
+/** Chapter numbers a book has in the given translation — the browse picker's second step. */
+export async function listChaptersAction(translation: string, book: string): Promise<number[]> {
+  await requireActiveMembership();
+  return getChaptersForBook(translation, book);
+}
+
+/** Verse text for one chapter — the browse picker's third step, and what actually pushes live on selection. */
+export async function listVersesAction(
+  translation: string,
+  book: string,
+  chapter: number,
+): Promise<VerseSearchResult[]> {
+  await requireActiveMembership();
+  const rows = await getVersesForChapter(translation, book, chapter);
+  return rows.map((r) => ({ translation, book, chapter, verse: r.verse, text: r.text, label: label(book, chapter, r.verse) }));
 }

@@ -2,6 +2,7 @@
 
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { IconTrash } from "@tabler/icons-react";
 
 export function DeleteButton({ onDelete }: { onDelete: () => Promise<void> }) {
   const router = useRouter();
@@ -18,9 +19,9 @@ export function DeleteButton({ onDelete }: { onDelete: () => Promise<void> }) {
         })
       }
       aria-label="Delete"
-      className="text-live hover:bg-live/10 shrink-0 rounded border border-border px-2 py-1 text-xs disabled:opacity-30"
+      className="hover:text-danger hover:bg-danger/10 shrink-0 rounded-lg p-1.5 text-text-secondary/60 disabled:opacity-30"
     >
-      ✕
+      <IconTrash size={15} stroke={1.75} aria-hidden="true" />
     </button>
   );
 }

@@ -21,8 +21,8 @@ export default async function LibraryPage() {
 
   if (!allowed) {
     return (
-      <div className="border-live/40 bg-live/10 rounded-xl border p-6">
-        <h1 className="text-live text-lg font-semibold">Access restricted</h1>
+      <div className="border-danger/40 bg-danger/10 rounded-xl border p-6">
+        <h1 className="text-danger text-lg font-semibold">Access restricted</h1>
         <p className="mt-2 text-sm text-text-primary">
           The content library requires the operator or admin role. You&apos;re signed in as{" "}
           <strong>{membership.role}</strong>.

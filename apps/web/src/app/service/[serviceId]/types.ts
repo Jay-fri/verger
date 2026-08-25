@@ -29,19 +29,23 @@ export type LiveItem = {
 
 export type DetectedEntry = {
   id: string;
-  // "confident"/"needs-review" is purely about confidence (drives the
-  // sage/terracotta coloring — always shown, in both Auto and Manual mode,
-  // since it's informational either way). Whether this entry actually made
-  // it to the live output automatically is a SEPARATE question — see
-  // autoDisplayed below — because a confident match can still be sitting
-  // here unconfirmed, either because the session is in Manual mode or
-  // because the minimum-display-time debounce held it back.
-  status: "confident" | "needs-review" | "confirmed";
-  // True only when this entry was actually auto-pushed to the live output
-  // (Auto mode, confident, and not suppressed by the debounce). Confirm/
-  // Dismiss buttons show whenever this is false and status isn't
-  // "confirmed" yet — i.e. the operator still has to act on it, regardless
-  // of why it didn't auto-display.
+  // Purely about detection confidence — drives the sage/terracotta dot
+  // color, permanently, regardless of what the operator later does with the
+  // entry. Deliberately kept separate from `action` below: confidence is a
+  // fact about the detection, action is what happened to it since.
+  confidence: "confident" | "needs-review";
+  // What's happened to this entry since it was detected — persists for the
+  // whole session (the AI Detected panel keeps every entry visible, never
+  // removes one). "pending": still needs a tap. "confirmed": pushed live,
+  // either by auto-display or an operator tap. "dismissed": operator
+  // declined it. Every entry stays clickable regardless of `action` —
+  // tapping any of them (pending, confirmed, or dismissed) re-pushes it live
+  // and sets `action` to "confirmed", the same as confirming a fresh one.
+  action: "pending" | "confirmed" | "dismissed";
+  // True only if this entry was actually auto-pushed to the live output at
+  // the moment it was detected (Auto mode, confident, not suppressed by the
+  // debounce). Kept separate from `action` so the "Auto-displayed" history
+  // label stays accurate even after a later manual re-tap re-confirms it.
   autoDisplayed: boolean;
   translation: string;
   book: string;

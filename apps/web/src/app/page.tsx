@@ -12,7 +12,7 @@ const DB_STATUS_LABEL: Record<string, string> = {
 const DB_STATUS_COLOR: Record<string, string> = {
   connected: "bg-confident",
   not_configured: "bg-needs-review",
-  error: "bg-live",
+  error: "bg-danger",
 };
 
 export default async function HealthCheckPage() {

@@ -17,7 +17,7 @@ const STATUS_LABEL: Record<string, string> = {
 
 const STATUS_COLOR: Record<string, string> = {
   draft: "bg-text-secondary/15 text-text-secondary",
-  live: "bg-live/15 text-live",
+  live: "bg-accent-gold/15 text-accent-gold",
   ended: "bg-text-secondary/15 text-text-secondary",
 };
 
@@ -32,8 +32,8 @@ export default async function PrepPage() {
 
   if (!allowed) {
     return (
-      <div className="border-live/40 bg-live/10 rounded-xl border p-6">
-        <h1 className="text-live text-lg font-semibold">Access restricted</h1>
+      <div className="border-danger/40 bg-danger/10 rounded-xl border p-6">
+        <h1 className="text-danger text-lg font-semibold">Access restricted</h1>
         <p className="mt-2 text-sm text-text-primary">
           Prep requires the operator or admin role. You&apos;re signed in as{" "}
           <strong>{membership.role}</strong>.
@@ -77,7 +77,7 @@ export default async function PrepPage() {
             {churchServices.map((service) => (
               <li key={service.id} className="flex items-center justify-between py-3">
                 <Link
-                  href={`/dashboard/prep/${service.id}`}
+                  href={`/service/${service.id}?mode=prep`}
                   className="text-sm font-medium text-text-primary hover:text-accent-gold"
                 >
                   {service.title}

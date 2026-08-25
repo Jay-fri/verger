@@ -15,6 +15,7 @@
   "dependencies": {
     "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.48.1",
+    "@tabler/icons-react": "^3.46.0",
     "@verger/bible-data": "workspace:*",
     "@verger/detection-engine": "workspace:*",
     "@verger/shared-types": "workspace:*",

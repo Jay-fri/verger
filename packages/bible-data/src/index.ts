@@ -20,6 +20,8 @@ export {
   resolveScripture,
   getVersesForReference,
   getAdjacentVerse,
+  getChaptersForBook,
+  getVersesForChapter,
   type ResolveResult,
   type ResolvedVerse,
 } from "./resolve";

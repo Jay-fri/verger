@@ -1,38 +1,42 @@
 @import "tailwindcss";
 
 /*
- * Verger design tokens.
- * Dark is the default/primary theme (the Control console runs in a dim booth
- * environment). Light overrides apply under [data-theme="light"] for
- * Prep/admin screens used in daytime. Values are exact hex from the project
- * overview's "Design direction" section — do not adjust without updating
- * that doc too.
+ * Verger design tokens — charcoal + one bold accent, per the app-wide visual
+ * redesign. Single theme now (the previous light/dark split is gone): one
+ * consistent visual language across Dashboard/Prep/Library/Console, not a
+ * daytime-vs-booth distinction. Values are exact hex from this redesign —
+ * mirrored in the project overview's "Design direction" section, keep both
+ * in sync.
+ *
+ * accent-gold (#F5A623) is reserved for the primary CTA and the current/live
+ * item ONLY — never decoration. danger (#E53935) is reserved for the panic
+ * controls (Clear/Black/Logo) ONLY. Content-type colors are a separate,
+ * fixed vocabulary (see cue-type-badge.tsx) used identically everywhere a
+ * scripture/song/announcement/custom-text item appears.
  */
 :root {
-  --color-background: #17140f;
-  --color-surface: #221d17;
-  --color-border: #3a322a;
-  --color-text-primary: #f3ecdd;
-  --color-text-secondary: #a89b87;
-  --color-accent-gold: #d6a34c;
-  --color-confident: #7c9257;
-  --color-needs-review: #c97a3d;
-  --color-live: #b5473a;
+  --color-background: #121212;
+  --color-surface: #1c1c1c;
+  --color-border: #2e2e2e;
+  --color-text-primary: #f5f5f5;
+  --color-text-secondary: #9a9a9a;
+  --color-accent-gold: #f5a623;
+  --color-accent-gold-ink: #1a1200;
+  --color-danger: #e53935;
+  --color-confident: #3dae6b;
+  --color-needs-review: #e2622f;
+
+  /* Content-type vocabulary — one fixed icon + one fixed color per type,
+     used identically in Prep's outline, Library's lists, and the Control
+     console's order-of-service panel. Scripture shares the accent gold
+     since it's the hero content type this whole product is built around. */
+  --color-type-scripture: #f5a623;
+  --color-type-song: #4fa8d8;
+  --color-type-announcement: #b57edc;
+  --color-type-custom: #8a8f98;
 
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-[data-theme="light"] {
-  --color-background: #f7f1e6;
-  --color-surface: #fffcf5;
-  --color-border: #ded2b9;
-  --color-text-primary: #241f19;
-  --color-text-secondary: #6e6455;
-  --color-accent-gold: #a9782a;
-  --color-confident: #5f7a3d;
-  --color-needs-review: #a85f27;
-  --color-live: #96392d;
 }
 
 @theme inline {
@@ -42,9 +46,14 @@
   --color-text-primary: var(--color-text-primary);
   --color-text-secondary: var(--color-text-secondary);
   --color-accent-gold: var(--color-accent-gold);
+  --color-accent-gold-ink: var(--color-accent-gold-ink);
+  --color-danger: var(--color-danger);
   --color-confident: var(--color-confident);
   --color-needs-review: var(--color-needs-review);
-  --color-live: var(--color-live);
+  --color-type-scripture: var(--color-type-scripture);
+  --color-type-song: var(--color-type-song);
+  --color-type-announcement: var(--color-type-announcement);
+  --color-type-custom: var(--color-type-custom);
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
 }

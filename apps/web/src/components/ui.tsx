@@ -69,10 +69,16 @@ export function SubmitButton({
   );
 }
 
+// Genuine problem/error state (form validation, connection lost) — shares
+// danger's red hue, but only ever as a thin border/tint/text treatment,
+// never the solid filled block the panic buttons use. That's what keeps
+// panic buttons "recognizable without reading the label": filled-solid-red
+// is unique to them; a bordered red message is the universal, expected
+// "something's wrong" convention everywhere else.
 export function ErrorMessage({ children }: { children: ReactNode | null }) {
   if (!children) return null;
   return (
-    <p className="rounded-lg border border-live/40 bg-live/10 px-3 py-2 text-sm text-live">
+    <p className="rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
       {children}
     </p>
   );
@@ -92,9 +98,13 @@ const ROLE_LABEL: Record<string, string> = {
   volunteer: "Volunteer",
 };
 
+// Confident/needs-review green/orange are reserved for the AI Detected
+// queue only (see globals.css) — role badges stay in the neutral/accent
+// vocabulary instead: admin gets the one "special" tier (accent gold),
+// operator/volunteer are both plain neutral, differentiated by weight only.
 const ROLE_COLOR: Record<string, string> = {
   admin: "bg-accent-gold/15 text-accent-gold",
-  operator: "bg-confident/15 text-confident",
+  operator: "bg-text-primary/10 text-text-primary",
   volunteer: "bg-text-secondary/15 text-text-secondary",
 };
 

@@ -139,37 +139,31 @@ _This section is for development/Claude Code — not part of what the media dire
    - Needs review → terracotta/orange treatment, operator should confirm before it goes live
    - Color alone communicates the required action — no numeric confidence score should be surfaced in the UI.
 
-**Color palette** — warm ink/parchment identity, deliberately not the cold blue-gradient look common across AI products and most competitors in this category:
+**Color palette** — revised (app-wide redesign, superseding the original warm ink/parchment identity): charcoal + one bold accent, single theme across the whole app. The earlier light/dark split (light for daytime Prep, dark for the booth) is gone in favor of one consistent visual language, now that Prep and the Control console are one merged Service screen:
 
-_Dark mode (primary — the Control console runs in a dim booth environment):_
+| Role                                              | Hex       |
+| -------------------------------------------------- | --------- |
+| Base background                                    | `#121212` |
+| Surface / card                                     | `#1C1C1C` |
+| Border                                              | `#2E2E2E` |
+| Text primary                                        | `#F5F5F5` |
+| Text secondary                                      | `#9A9A9A` |
+| Accent gold (primary CTA + active/live item ONLY)   | `#F5A623` |
+| Danger (panic controls ONLY — Clear/Black/Logo)     | `#E53935` |
+| Confident match                                     | `#3DAE6B` |
+| Needs review                                        | `#E2622F` |
+| Live / on-air indicator                             | `#E53935` |
 
-| Role                                  | Hex       |
-| ------------------------------------- | --------- |
-| Base background                       | `#17140F` |
-| Surface / card                        | `#221D17` |
-| Border                                | `#3A322A` |
-| Text primary                          | `#F3ECDD` |
-| Text secondary                        | `#A89B87` |
-| Accent gold (brand, active/live item) | `#D6A34C` |
-| Confident match                       | `#7C9257` |
-| Needs review                          | `#C97A3D` |
-| Live / on-air indicator               | `#B5473A` |
+Content-type vocabulary (fixed icon + fixed color per type, identical everywhere a scripture/song/announcement/custom-text item appears — Prep's outline, Library's lists, the Control console's order-of-service panel):
 
-_Light mode (Prep/admin screens, daytime use):_
+| Type         | Hex                                                  |
+| ------------ | ----------------------------------------------------- |
+| Scripture    | `#F5A623` (shares the accent — it's the hero content type) |
+| Song         | `#4FA8D8`                                              |
+| Announcement | `#B57EDC`                                              |
+| Custom text  | `#8A8F98`                                              |
 
-| Role                    | Hex       |
-| ----------------------- | --------- |
-| Base background         | `#F7F1E6` |
-| Surface / card          | `#FFFCF5` |
-| Border                  | `#DED2B9` |
-| Text primary            | `#241F19` |
-| Text secondary          | `#6E6455` |
-| Accent gold             | `#A9782A` |
-| Confident match         | `#5F7A3D` |
-| Needs review            | `#A85F27` |
-| Live / on-air indicator | `#96392D` |
-
-**Iconography**: avoid default outline icon packs (Feather, Lucide, etc.) — every competitor in this category uses one of these, and it's the fastest way to look generic. Prefer a small custom icon set built around manuscript/typographic motifs (a quill-nib cursor, a marginalia mark, an open-fold shape) rather than stock outline icons, especially for the handful of icons that appear constantly (live indicator, confirm/override, cue list item types).
+**Iconography**: reversed from the original direction — real icons everywhere now (a standard outline set, Tabler-style), not a custom manuscript-motif set. Every content type, nav item, and action gets one fixed icon; nothing is a bare text glyph (no more raw ↑/↓/✕ button trios). The original rationale (avoid looking like every other outline-icon competitor) is superseded here by earned familiarity: a media-team volunteer under time pressure benefits more from instantly-recognizable standard iconography than from a distinctive-but-unfamiliar custom set.
 
 ### Feature audit and competitive mapping
 

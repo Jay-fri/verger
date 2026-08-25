@@ -131,6 +131,12 @@ export const services = pgTable("services", {
     .notNull()
     .references(() => churches.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
+  // Defaults to the upcoming Sunday at creation time (see createServiceAction)
+  // — what the redesigned home screen's "This week" hero card displays and
+  // uses to decide which service is "current" (the most recent non-ended
+  // service scoped to this church, per computeServiceState). Editable later
+  // if a real date-picker UI is ever needed; not exposed yet.
+  scheduledFor: timestamp("scheduled_for", { withTimezone: true }).notNull().defaultNow(),
   status: serviceStatusEnum("status").notNull().default("draft"),
   displayMode: displayModeEnum("display_mode").notNull().default("auto"),
   createdBy: uuid("created_by")

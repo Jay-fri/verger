@@ -8,9 +8,10 @@ import { db } from "@/lib/db";
 import { announcementSlides, cueItems, customTexts, services, songSections, songs } from "@/lib/db/schema";
 import { requireActiveMembership, type ActiveMembership } from "@/lib/auth/membership";
 import type { CurrentUser } from "@/lib/auth/session";
-import type { CueSection } from "./cue-sections";
+import { sortBySectionThenPosition, type CueSection } from "./cue-sections";
+import { nextSunday } from "./service-state";
 import type { VerseSearchResult } from "./search";
-import type { CueItemType } from "./types";
+import type { CueItem, CueItemType } from "./types";
 
 async function requirePrepAccess(): Promise<{ user: CurrentUser; membership: ActiveMembership }> {
   const { user, membership } = await requireActiveMembership();
@@ -38,10 +39,26 @@ export async function createServiceAction(
 
   const [service] = await db
     .insert(services)
-    .values({ churchId: membership.church.id, title, createdBy: user.id })
+    .values({ churchId: membership.church.id, title, createdBy: user.id, scheduledFor: nextSunday() })
     .returning();
 
-  redirect(`/dashboard/prep/${service.id}`);
+  redirect(`/service/${service.id}?mode=prep`);
+}
+
+/** The home screen's "Start prep" CTA — creates this week's service with an auto-generated title, rather than making the operator fill out a form just to get started. */
+export async function startThisWeeksServiceAction(): Promise<void> {
+  const { user, membership } = await requirePrepAccess();
+  if (!db) throw new Error("Database is not configured.");
+
+  const scheduledFor = nextSunday();
+  const title = `Sunday Service — ${scheduledFor.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+
+  const [service] = await db
+    .insert(services)
+    .values({ churchId: membership.church.id, title, createdBy: user.id, scheduledFor })
+    .returning();
+
+  redirect(`/service/${service.id}?mode=prep`);
 }
 
 type NewCueContent =
@@ -107,7 +124,7 @@ export async function addCueItemAction(
 ): Promise<void> {
   await requirePrepAccess();
   await insertCueItem(serviceId, section, { type: "verse", ...verse });
-  revalidatePath(`/dashboard/prep/${serviceId}`);
+  revalidatePath(`/service/${serviceId}`);
 }
 
 export async function addSongSectionCueAction(
@@ -133,7 +150,7 @@ export async function addSongSectionCueAction(
     songSectionId: songSection.id,
   });
   await syncSongArrangement(serviceId, songSection.songId);
-  revalidatePath(`/dashboard/prep/${serviceId}`);
+  revalidatePath(`/service/${serviceId}`);
 }
 
 // Adds every section of a song in one step, in the order they were last
@@ -174,7 +191,7 @@ export async function addSongArrangementCueAction(
   }
 
   await syncSongArrangement(serviceId, songId);
-  revalidatePath(`/dashboard/prep/${serviceId}`);
+  revalidatePath(`/service/${serviceId}`);
 }
 
 export async function addAnnouncementSlideCueAction(
@@ -198,7 +215,7 @@ export async function addAnnouncementSlideCueAction(
     label: slide.announcement.title,
     text: slide.text,
   });
-  revalidatePath(`/dashboard/prep/${serviceId}`);
+  revalidatePath(`/service/${serviceId}`);
 }
 
 export async function addCustomTextCueAction(
@@ -215,7 +232,7 @@ export async function addCustomTextCueAction(
   }
 
   await insertCueItem(serviceId, section, { type: "custom_text", label: item.title, text: item.text });
-  revalidatePath(`/dashboard/prep/${serviceId}`);
+  revalidatePath(`/service/${serviceId}`);
 }
 
 // Custom text is meant for one-off use ("type it once, put it on screen" —
@@ -244,7 +261,85 @@ export async function createAndAddCustomTextCueAction(
   });
 
   await insertCueItem(serviceId, section, { type: "custom_text", label: trimmedTitle, text: trimmedText });
-  revalidatePath(`/dashboard/prep/${serviceId}`);
+  revalidatePath(`/service/${serviceId}`);
+}
+
+// The other half of the inline composer's "save to library?" toggle —
+// unlike createAndAddCustomTextCueAction, this never touches the customTexts
+// table. Pure one-off: lands in this service's outline only, per the design
+// spec's requirement that inline Custom text explicitly distinguish "one-off"
+// from "saved to Library" rather than always silently doing one or the other.
+export async function addOneOffCustomTextCueAction(
+  serviceId: string,
+  section: CueSection,
+  title: string,
+  text: string,
+): Promise<void> {
+  await requirePrepAccess();
+
+  const trimmedTitle = title.trim();
+  const trimmedText = text.trim();
+  if (!trimmedTitle || !trimmedText) {
+    throw new Error("Title and text are required.");
+  }
+
+  await insertCueItem(serviceId, section, { type: "custom_text", label: trimmedTitle, text: trimmedText });
+  revalidatePath(`/service/${serviceId}`);
+}
+
+// Backs the merged Service screen's client-side outline state: rather than a
+// full router.refresh() (a page-level reload of the whole route) after every
+// composer add/remove/reorder, the client re-fetches just the outline and
+// splices it into local state — see service-screen.tsx. Sorted the same way
+// every other outline consumer expects (section, then position).
+export async function getCueItemsAction(serviceId: string): Promise<CueItem[]> {
+  await requireActiveMembership();
+  if (!db) throw new Error("Database is not configured.");
+
+  const rows = await db.query.cueItems.findMany({ where: eq(cueItems.serviceId, serviceId) });
+  return sortBySectionThenPosition(rows);
+}
+
+// Drag-and-drop reorder within one section — replaces moveCueItemAction's
+// one-step-at-a-time up/down swap for the new grip-handle drag UI. `position`
+// is a single counter across the whole service (see cue-sections.ts), but
+// since every sort in this app groups by section first, reassigning 0..n-1
+// here for just this section's items can't collide in effect with another
+// section's positions — section rank always wins the comparison first.
+export async function reorderCueItemsAction(
+  serviceId: string,
+  section: CueSection,
+  orderedCueItemIds: string[],
+): Promise<void> {
+  await requirePrepAccess();
+  if (!db) throw new Error("Database is not configured.");
+
+  for (let i = 0; i < orderedCueItemIds.length; i++) {
+    await db
+      .update(cueItems)
+      .set({ position: i })
+      .where(
+        and(
+          eq(cueItems.id, orderedCueItemIds[i]),
+          eq(cueItems.serviceId, serviceId),
+          eq(cueItems.section, section),
+        ),
+      );
+  }
+
+  const touched = await db.query.cueItems.findMany({ where: inArray(cueItems.id, orderedCueItemIds) });
+  const touchedSongSectionIds = touched.map((item) => item.songSectionId).filter((id): id is string => id !== null);
+  if (touchedSongSectionIds.length > 0) {
+    const touchedSections = await db.query.songSections.findMany({
+      where: inArray(songSections.id, touchedSongSectionIds),
+    });
+    const songIds = new Set(touchedSections.map((s) => s.songId));
+    for (const songId of songIds) {
+      await syncSongArrangement(serviceId, songId);
+    }
+  }
+
+  revalidatePath(`/service/${serviceId}`);
 }
 
 export async function removeCueItemAction(serviceId: string, cueItemId: string): Promise<void> {
@@ -264,7 +359,7 @@ export async function removeCueItemAction(serviceId: string, cueItemId: string):
     if (songSection) await syncSongArrangement(serviceId, songSection.songId);
   }
 
-  revalidatePath(`/dashboard/prep/${serviceId}`);
+  revalidatePath(`/service/${serviceId}`);
 }
 
 export async function moveCueItemAction(
@@ -332,5 +427,5 @@ export async function moveCueItemAction(
     }
   }
 
-  revalidatePath(`/dashboard/prep/${serviceId}`);
+  revalidatePath(`/service/${serviceId}`);
 }

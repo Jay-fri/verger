@@ -24,9 +24,10 @@ audio — this package is testable entirely via its own test suite and scripts, 
 
 ## Translations
 
-Ingests four **public-domain** translations, which sidesteps licensing questions entirely —
+Ingests seven **public-domain** translations, which sidesteps licensing questions entirely —
 **World English Bible (WEB)**, **King James Version (KJV)**, **American Standard Version (ASV)**,
-and **Young's Literal Translation (YLT)**. Source for all four:
+**Young's Literal Translation (YLT)**, **Berean Standard Bible (BSB)**, **Geneva Bible (GNV,
+1599)**, and **Douay-Rheims Bible (DRB)**. Source for all seven:
 [bolls.life](https://bolls.life)'s public JSON API, which serves the standard 66-book Protestant
 canon under each translation's own short code (bolls.life also lists Apocryphal books under
 higher book IDs; the ingest script filters to IDs 1-66 only, and re-verifies book order/count per
@@ -34,18 +35,31 @@ translation — see the Strong's-number note below for why "per translation," no
 
 **WEB is the one "matching" translation** — the only one with embeddings (`run-embed.ts` is
 explicitly scoped to it via `DEFAULT_TRANSLATION`), since detection/semantic search need to run
-against one consistent vector space. KJV/ASV/YLT exist for **display only**: resolved by
-canonical `(book, chapter, verse)` reference after a match is already found in WEB, never
+against one consistent vector space. Every other translation exists for **display only**: resolved
+by canonical `(book, chapter, verse)` reference after a match is already found in WEB, never
 searched themselves. See the root README's "Multiple translations, switchable live" section for
 how `apps/web` wires this decoupling into the Control console's live translation switcher.
 
-**A licensed modern translation (NIV, ESV, NASB, NLT, CSB, etc.) needs its own rights/licensing
-check with the publisher before production use** — this is flagged per the project overview doc,
-and enforced in code via `BIBLE_TRANSLATIONS` in `packages/shared-types`, which only ever lists
-translations actually ingested here. bolls.life happens to serve those other codes too (for its
-own app) — that's not a redistribution license for this one. Adding a fifth translation later is
-just `pnpm ingest <CODE>` with a new bolls.life short code; the schema already supports
-multiple translations coexisting (unique constraint is on `(translation, book, chapter, verse)`).
+**A licensed modern translation (NIV, ESV, NASB, NLT, CSB, TPT, NKJV, etc.) needs its own
+rights/licensing check with the publisher before production use** — this is flagged per the
+project overview doc, and enforced in code via `BIBLE_TRANSLATIONS` in `packages/shared-types`,
+which only ever lists translations actually ingested here. bolls.life happens to serve those other
+codes too (for its own app) — that's not a redistribution license for this one. Adding another
+translation later is just `pnpm ingest <CODE>` with a new bolls.life short code; the schema
+already supports multiple translations coexisting (unique constraint is on `(translation, book,
+chapter, verse)`).
+
+**LSV (Literal Standard Version)** is also on bolls.life and is freely redistributable, but under
+CC BY-SA rather than public domain — it requires visible attribution wherever displayed, unlike
+everything above. Not ingested here; adding it is a product decision (where that attribution would
+show up in the UI), not just an ingestion question.
+
+**DRB needed a slower ingest.** bolls.life rate-limited (`HTTP 429`) repeated attempts at the
+default concurrency (8) and at a reduced concurrency of 2 — it behaves like a cumulative quota, not
+a simple per-minute burst window, since lower concurrency delayed the 429 without preventing it.
+Succeeded at fully sequential concurrency (1). `fetchTranslation()`'s concurrency parameter exists
+for exactly this — if a future translation hits the same wall, try `fetchTranslation(code, onChapter, 1)`
+before assuming something else is wrong.
 
 **Real bug found ingesting KJV/ASV**: bolls.life serves both with inline Strong's-number
 (`<S>1063</S>`) and footnote (`<sup>...</sup>`) annotations baked directly into the verse text.
@@ -61,7 +75,7 @@ the full dataset: zero rows in either translation match `/[a-zA-Z]\d/` post-fix.
 cp .env.example .env.local   # same Supabase Postgres project as apps/web — copy DATABASE_URL from there
 pnpm db:generate && pnpm db:migrate   # creates the `verses` table + pgvector extension
 pnpm ingest              # fetches and stores WEB (~31k verses, ~1-2 min) — the matching translation
-pnpm ingest KJV       # (or ASV / YLT) — display-only, no embedding step needed for these
+pnpm ingest KJV       # (or ASV / YLT / BSB / GNV / DRB) — display-only, no embedding step needed for these
 pnpm embed               # generates + stores embeddings for WEB only (resumable if interrupted)
 ```
 

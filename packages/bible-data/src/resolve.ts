@@ -139,6 +139,37 @@ export async function getAdjacentVerse(
 }
 
 /**
+ * Distinct chapter numbers a book actually has in this translation — backs
+ * the Control console's Bible browse picker (book → chapter step). Every
+ * ingested translation covers the same canonical 66 books, so this is really
+ * "how many chapters does this book have," but scoped by translation anyway
+ * in case a future translation is ever ingested only partially.
+ */
+export async function getChaptersForBook(translation: string, book: string): Promise<number[]> {
+  const db = getDb();
+  const rows = await db
+    .selectDistinct({ chapter: verses.chapter })
+    .from(verses)
+    .where(and(eq(verses.translation, translation), eq(verses.book, book)))
+    .orderBy(asc(verses.chapter));
+  return rows.map((r) => r.chapter);
+}
+
+/** Verse → text for one chapter — the browse picker's final (chapter → verse) step. */
+export async function getVersesForChapter(
+  translation: string,
+  book: string,
+  chapter: number,
+): Promise<{ verse: number; text: string }[]> {
+  const db = getDb();
+  return db
+    .select({ verse: verses.verse, text: verses.text })
+    .from(verses)
+    .where(and(eq(verses.translation, translation), eq(verses.book, book), eq(verses.chapter, chapter)))
+    .orderBy(asc(verses.verse));
+}
+
+/**
  * The single entry point the detection engine will call: tries exact-
  * reference parsing first ("John 3:16"), and only falls back to embedding-
  * based semantic search over the full input text if that path finds nothing

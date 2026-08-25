@@ -19,21 +19,30 @@ export type InviteStatus = (typeof INVITE_STATUSES)[number];
  * packages/bible-data/src/ingest/) — public domain, so none of them raise a
  * licensing question during development or production. WEB is also the one
  * "matching" translation detection/semantic search runs against (it's the
- * only one with embeddings — see run-embed.ts); the other three exist for
- * DISPLAY only, resolved by canonical reference after a match is already
- * found (see the Control console's translation switcher).
+ * only one with embeddings — see run-embed.ts); every other translation
+ * exists for DISPLAY only, resolved by canonical reference after a match is
+ * already found (see the Control console's translation switcher).
  *
- * A licensed modern translation (NIV, ESV, NASB, NLT, CSB, etc.) needs its
- * own rights/licensing check with the publisher before it could be added
- * here — bolls.life happens to serve those too (for its own app), but
+ * A licensed modern translation (NIV, ESV, NASB, NLT, CSB, TPT, NKJV, etc.)
+ * needs its own rights/licensing check with the publisher before it could be
+ * added here — bolls.life happens to serve those too (for its own app), but
  * that's not a redistribution license for this app. Don't add one of those
  * codes to this list without that clearance sorted first.
+ *
+ * LSV (Literal Standard Version) is also available on bolls.life and IS
+ * freely redistributable, but under CC BY-SA — unlike everything below,
+ * that requires visible attribution wherever it's displayed, not just a
+ * license-compatibility check. Intentionally left out of ingestion pending
+ * a product decision on how/where that attribution would be shown.
  */
 export const BIBLE_TRANSLATIONS = [
   { code: "WEB", label: "World English Bible (WEB)", license: "public-domain" },
   { code: "KJV", label: "King James Version (KJV)", license: "public-domain" },
   { code: "ASV", label: "American Standard Version (ASV)", license: "public-domain" },
   { code: "YLT", label: "Young's Literal Translation (YLT)", license: "public-domain" },
+  { code: "BSB", label: "Berean Standard Bible (BSB)", license: "public-domain" },
+  { code: "GNV", label: "Geneva Bible (GNV)", license: "public-domain" },
+  { code: "DRB", label: "Douay-Rheims Bible (DRB)", license: "public-domain" },
 ] as const;
 export type BibleTranslationCode = (typeof BIBLE_TRANSLATIONS)[number]["code"];
 

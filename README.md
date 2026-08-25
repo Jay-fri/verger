@@ -11,9 +11,9 @@ Browser Source), Phase 6.5 (verse Previous/Next navigation + a quick-insert pane
 Phase 7 (real streaming transcription via AssemblyAI, replacing the mocked transcript feed), and
 Phase 8 (a batch of competitive-audit features — session Auto/Manual display mode, a minimum-display-
 time debounce, Clear/Black/Logo panic buttons, a Stage confidence monitor, operator-to-stage
-messaging, order-of-service sections, saved song arrangements) are done. This phase adds three more
-public-domain translations (KJV, ASV, YLT, alongside WEB) and a live translation switcher in the
-Control console — see "Multiple translations, switchable live" below.
+messaging, order-of-service sections, saved song arrangements) are done. This phase adds more
+public-domain translations (KJV, ASV, YLT, BSB, GNV, DRB, alongside WEB — 7 total) and a live
+translation switcher in the Control console — see "Multiple translations, switchable live" below.
 
 ## Folder structure
 
@@ -812,6 +812,32 @@ sessions start on; a session already running keeps whatever the operator has it 
 all four translations and asserts genuinely distinct wording (not the same text relabeled), the Strong's-
 number regression check above, and `resolveScripture`'s `opts.translation` threading through to exact-
 match text.
+
+### Three more translations added (still Phase 9, additive)
+
+**BSB (Berean Standard Bible), GNV (Geneva Bible, 1599), and DRB (Douay-Rheims Bible, 1899 Challoner
+revision)** — same public-domain bar as WEB/KJV/ASV/YLT, ingested the same way via `pnpm ingest <CODE>`.
+No code changes beyond `BIBLE_TRANSLATIONS` in `packages/shared-types`: the translation-switcher work
+above already made every translation-aware code path generic over the code string, so adding one is purely
+a data-ingestion + allow-list change. All 7 translations verified post-ingest with
+`select translation, count(*), count(embedding) from verses group by translation` — ~31k verses each
+(DRB: 31,263; BSB: 31,086; GNV: 31,090), `count(embedding)` zero for all but WEB, confirming matching still
+runs on exactly one translation. John 3:16 spot-checked across all three to confirm genuinely distinct
+wording, not placeholder or duplicated text (Geneva's 16th-century spelling — "loued", "worlde", "onely
+begotten Sonne" — is an especially clear tell that the real text ingested, not a WEB copy relabeled).
+
+**DRB's ingestion needed a slower path.** bolls.life rate-limited (`HTTP 429`) repeated ingestion attempts
+at the library's default concurrency (8), and again at a reduced concurrency of 2 — it behaves like a
+cumulative quota rather than a simple per-minute burst window, since lower concurrency delayed the 429 but
+didn't prevent it. Succeeded on a fully sequential (concurrency 1) run. If a future re-ingest of DRB (or a
+similarly-sized translation) hits the same wall, `pnpm ingest DRB` is idempotent and safe to retry — bolls.life's
+rate limit resets over time, and `fetchTranslation()`'s `onConflictDoUpdate` means a partial prior attempt
+never leaves bad data, just incomplete data, so retrying (or waiting and retrying) is always safe.
+
+**LSV (Literal Standard Version)** is also served by bolls.life and is freely redistributable, but under
+CC BY-SA rather than public domain — it requires visible attribution wherever displayed, which none of the
+other translations here need. Deliberately not ingested: adding it is a product decision (where/how to show
+that attribution in the Control console and Stage output), not just an ingestion question.
 
 ## Prerequisites
 
