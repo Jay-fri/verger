@@ -15,7 +15,15 @@ on:
 
 jobs:
   build-windows:
-    runs-on: windows-latest
+    # Not windows-latest, deliberately: that image now ships VS 2026 (major
+    # version 18), which @electron/node-gyp's pinned fork doesn't recognize
+    # at all — a second, separate problem from the ERR_CHILD_PROCESS_
+    # STDIO_MAXBUFFER crash it also hits there (see git history/README for
+    # both). windows-2022 still ships VS 2022, which the fork does
+    # recognize, and — unverified but the working theory — a smaller VS
+    # component set whose query output might stay under node-gyp's
+    # unconfigurable 1MB execFile buffer where windows-latest's doesn't.
+    runs-on: windows-2022
     defaults:
       run:
         working-directory: apps/desktop
