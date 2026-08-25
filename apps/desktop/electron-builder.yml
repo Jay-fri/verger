@@ -1,0 +1,40 @@
+# Packaging config for the Windows installer described in
+# verger-project-overview.md's "Desktop NDI bridge" section (checkpoint 5).
+#
+# Must actually be run ON Windows (or Windows CI — see
+# ../../.github/workflows/desktop-windows-build.yml) to produce a working
+# installer: grandiose's native NDI addon is compiled per-platform by
+# node-gyp with no prebuilt binaries (see README.md's "Why grandiose is
+# installed from a GitHub fork" section), so a macOS-built .node file
+# cannot be packaged into a Windows .exe — there is nothing to cross-compile
+# here, `electron-builder --win` from macOS would just package the wrong
+# platform's native addon.
+appId: video.ndi.verger.desktop
+productName: Verger Desktop
+directories:
+  output: release
+  buildResources: build-resources
+files:
+  - dist/**/*
+  - package.json
+  - "!node_modules/**/*.md"
+  - "!node_modules/grandiose/ndi/**/*"
+# Native addons can't be dlopen'd from inside an asar virtual filesystem —
+# grandiose's compiled .node file and the NDI runtime DLL it links against
+# both need to be real files on disk once installed. Also satisfies the NDI
+# SDK license's "include the NDI DLLs as part of your own application
+# folders" requirement — this bundles the runtime IN the app rather than
+# assuming NDI Tools is separately installed on the machine running it.
+asarUnpack:
+  - "**/node_modules/grandiose/**/*"
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: "${productName}-Setup-${version}.${ext}"
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+publish: null

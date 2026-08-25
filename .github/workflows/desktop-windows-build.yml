@@ -1,0 +1,60 @@
+# Builds the Windows installer for apps/desktop (the Electron NDI bridge).
+#
+# This has to run on a real Windows runner, not macOS/Linux CI: grandiose's
+# native NDI addon has no prebuilt binaries (see apps/desktop/README.md) and
+# compiles per-platform via node-gyp during `pnpm install`. A macOS-compiled
+# .node file can't be packaged into a Windows .exe — there's no
+# cross-compilation path here, only a real per-platform build.
+name: Desktop Windows build
+
+on:
+  push:
+    tags:
+      - "desktop-v*"
+  workflow_dispatch: {}
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      # node-gyp needs a C++ toolchain — windows-latest runners ship Visual
+      # Studio Build Tools already, this just points node-gyp at the right
+      # Python (also preinstalled on windows-latest).
+      - name: Configure node-gyp Python
+        run: pnpm config set python python3
+
+      # Installs the whole workspace (apps/desktop needs its monorepo
+      # siblings resolvable), compiles grandiose's native addon for Windows,
+      # then electron-rebuild (this package's postinstall script) recompiles
+      # it specifically against Electron's Node ABI.
+      - name: Install dependencies
+        working-directory: .
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build Windows installer
+        run: pnpm dist:win
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verger-desktop-windows-installer
+          path: apps/desktop/release/*.exe
+          if-no-files-found: error

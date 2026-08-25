@@ -1,0 +1,28 @@
+{
+  "name": "@verger/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Electron NDI bridge — exposes the Stage output route as an NDI source for vMix. See verger-project-overview.md's \"Desktop NDI bridge\" section.",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "pnpm build && electron .",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint",
+    "postinstall": "electron-rebuild -f -w grandiose",
+    "dist:win": "pnpm build && electron-builder --win"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^3.7.1",
+    "@eslint/js": "^9.18.0",
+    "@types/node": "^22.10.5",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
+    "eslint": "^9.18.0",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.20.0"
+  },
+  "dependencies": {
+    "grandiose": "github:rse/grandiose"
+  }
+}

@@ -1,9 +1,21 @@
 packages:
   - "apps/*"
   - "packages/*"
+# pnpm 11's default supply-chain protection blocks a dependency's own
+# transitive dependency from resolving via git/tarball ("exotic") sources
+# rather than the npm registry. Needed here because @electron/rebuild (used
+# to recompile apps/desktop's native NDI addon against Electron's own Node
+# ABI, not the system Node it's built against by default) depends on
+# @electron/node-gyp via a pinned git commit — that's an official
+# electron-org fork, not a third-party or unpinned reference, so this is a
+# scoped, known-good exception rather than a blanket bypass.
+blockExoticSubdeps: false
 allowBuilds:
   esbuild: true
   onnxruntime-node: true
   protobufjs: true
   sharp: true
   unrs-resolver: true
+  electron: true
+  electron-builder: true
+  grandiose: true
