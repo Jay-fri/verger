@@ -38,9 +38,22 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      # node-gyp needs a C++ toolchain and Python — windows-latest runners
-      # ship both (Visual Studio Build Tools + a preinstalled Python), and
-      # node-gyp auto-detects them without any explicit config needed.
+      # node-gyp's own Visual Studio auto-detection is broken on
+      # windows-latest runners specifically: it queries installed VS
+      # components via PowerShell with no maxBuffer override (defaults to
+      # Node's 1MB limit), and windows-latest ships enough VS workloads that
+      # the query's output exceeds that and crashes with
+      # ERR_CHILD_PROCESS_STDIO_MAXBUFFER — which node-gyp then
+      # mis-reports as "Could not find any Visual Studio installation to
+      # use" (confirmed by an actual failed run here: it HAD found VS and
+      # resolved MSBuild.exe's path just before the crash). Rather than
+      # hardcode this runner generation's VS path (which GitHub updates
+      # over time), this action finds whatever VS is actually installed and
+      # exports VCINSTALLDIR — set, node-gyp skips its own buggy
+      # PowerShell-based detection entirely (see node-gyp's
+      # lib/find-visualstudio.js).
+      - uses: ilammy/msvc-dev-cmd@v1
+
       # Installs the whole workspace (apps/desktop needs its monorepo
       # siblings resolvable), compiles grandiose's native addon for Windows,
       # then electron-rebuild (this package's postinstall script) recompiles
