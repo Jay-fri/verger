@@ -24,21 +24,23 @@ jobs:
         with:
           fetch-depth: 0
 
+      # No explicit version here — reads the exact pnpm version from the
+      # repo's own package.json "packageManager" field instead, so CI can
+      # never drift from what's actually used locally. That's what broke
+      # this originally: an unpinned `version: 11` resolved to the latest
+      # 11.x (11.23.0) rather than the 11.5.1 used everywhere else, and it
+      # turns out pnpm 11 as a whole line needs Node >=22.13 — the 20.x
+      # pinned below was simply wrong regardless of which 11.x resolved.
       - uses: pnpm/action-setup@v4
-        with:
-          version: 11
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
 
-      # node-gyp needs a C++ toolchain — windows-latest runners ship Visual
-      # Studio Build Tools already, this just points node-gyp at the right
-      # Python (also preinstalled on windows-latest).
-      - name: Configure node-gyp Python
-        run: pnpm config set python python3
-
+      # node-gyp needs a C++ toolchain and Python — windows-latest runners
+      # ship both (Visual Studio Build Tools + a preinstalled Python), and
+      # node-gyp auto-detects them without any explicit config needed.
       # Installs the whole workspace (apps/desktop needs its monorepo
       # siblings resolvable), compiles grandiose's native addon for Windows,
       # then electron-rebuild (this package's postinstall script) recompiles
